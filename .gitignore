@@ -30,6 +30,11 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# local-only OCR runtime assets (82MB)
+# 运行时默认从 npmmirror CDN 取 wasm，仓库不收录这份本地副本；
+# 需要回退本地副本时设 NEXT_PUBLIC_ORT_WASM_BASE=/ort/ 即可。
+/public/ort
+
 # env files (can opt-in for committing if needed)
 .env*
 
