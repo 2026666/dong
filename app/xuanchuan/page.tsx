@@ -1,12 +1,9 @@
-import type { Metadata } from "next";
-import LandingClient from "./landing-client";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = {
-  title: "三国冰河 · 盟战统计",
-  description:
-    "截图识别参战名单、自动计分、同分按赛季功勋排序、一键导出。免登录直接使用，数据只保存在本机浏览器。",
-};
-
-export default function XuanchuanPage() {
-  return <LandingClient />;
+/**
+ * /xuanchuan 兼容旧链接：宣传页已经搬到站点根路径 `/`，
+ * 之前分享出去的 /xuanchuan 链接会被重定向到首页。
+ */
+export default function XuanchuanLegacyPage() {
+  redirect("/");
 }

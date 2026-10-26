@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 
 const navItems = [
   { href: "/zhu", label: "主页", icon: LayoutGrid },
-  { href: "/", label: "总排名", icon: Trophy },
+  { href: "/rank", label: "总排名", icon: Trophy },
   { href: "/battles", label: "城战记录", icon: List },
   { href: "/upload", label: "上传识别", icon: Upload },
   { href: "/players", label: "赛季功勋", icon: Users },
@@ -40,7 +40,7 @@ export function NavBar() {
         <nav className="-mx-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {navItems.map(({ href, label, icon: Icon }) => {
             const active =
-              href === "/" ? pathname === "/" : pathname?.startsWith(href);
+              pathname === href || Boolean(pathname?.startsWith(href + "/"));
             return (
               <Link
                 key={href}
