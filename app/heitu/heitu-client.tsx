@@ -492,7 +492,12 @@ export default function HeituClient() {
             spellCheck={false}
           />
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-[var(--muted)]">
-            <span>{notice ?? "需要「成员名称」和「实力」两列；实力越高排得越靠城。"}</span>
+            <span>
+              {notice ??
+                (rawText.trim() && !ordered.length
+                  ? "没识别到名字：确认第一行是表头（含「成员名称」「实力」），每行用 Tab 分隔；表头少「序号」列也没关系。"
+                  : "需要「成员名称」和「实力」两列；实力越高排得越靠城。")}
+            </span>
             <span>
               {cells.length} 格 · {ordered.length} 人
               {stats.rounds > 1 ? ` · 已排到第 ${stats.rounds} 轮` : ""}

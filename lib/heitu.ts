@@ -147,6 +147,51 @@ function toNumber(input: string): number {
   return Number.isFinite(value) ? value : 0;
 }
 
+function isNumericCell(value: string): boolean {
+  return /^-?\d+(\.\d+)?$/.test(value.trim());
+}
+
+function numericRatioOf(rows: string[][], col: number): number {
+  if (col < 0) return 0;
+  const values = rows.map((row) => (row[col] ?? "").trim()).filter(Boolean);
+  if (!values.length) return 0;
+  return values.filter(isNumericCell).length / values.length;
+}
+
+/** 挑「名字列」：非数字内容占比最高的那一列 */
+function pickNameColumn(rows: string[][], cols: number): number {
+  let best = 0;
+  let bestScore = -1;
+  for (let col = 0; col < cols; col += 1) {
+    const values = rows.map((row) => (row[col] ?? "").trim()).filter(Boolean);
+    if (values.length < Math.max(1, Math.floor(rows.length * 0.5))) continue;
+    const score = values.filter((v) => !isNumericCell(v)).length / values.length;
+    if (score > bestScore) {
+      bestScore = score;
+      best = col;
+    }
+  }
+  return bestScore > 0 ? best : 0;
+}
+
+/** 挑「数值列」：数值占比高、且总和最大的那一列（跳过名字列） */
+function pickNumberColumn(rows: string[][], cols: number, skip: number): number {
+  let best = -1;
+  let bestSum = -1;
+  for (let col = cols - 1; col >= 0; col -= 1) {
+    if (col === skip) continue;
+    const values = rows.map((row) => (row[col] ?? "").trim()).filter(Boolean);
+    if (!values.length) continue;
+    if (values.filter(isNumericCell).length / values.length < 0.9) continue;
+    const sum = values.reduce((acc, v) => acc + (Number(v) || 0), 0);
+    if (sum > bestSum) {
+      bestSum = sum;
+      best = col;
+    }
+  }
+  return best;
+}
+
 function findColumn(header: string[], keys: string[]): number {
   for (const key of keys) {
     const index = header.findIndex((cell) => cell.replace(/\s/g, "") === key);
@@ -183,20 +228,36 @@ export function parseRosterRows(rows: string[][]): RosterParseResult {
   const cleaned = rows.filter((row) => row.some((cell) => cell.trim()));
   const header = cleaned[0] ?? [];
   const hasHeader = findColumn(header, NAME_KEYS) >= 0;
-
-  let nameIndex = findColumn(header, NAME_KEYS);
-  let powerIndex = findColumn(header, POWER_KEYS);
-  const meritIndex = findColumn(header, MERIT_KEYS);
-  const seqIndex = findColumn(header, SEQ_KEYS);
-
   const body = hasHeader ? cleaned.slice(1) : cleaned;
 
-  // 没有表头时按内容猜列：名字列、最大的数字列（实力）、序号列
-  if (nameIndex < 0) {
-    nameIndex = body[0]?.findIndex((cell) => cell && !/^\d+(\.\d+)?$/.test(cell)) ?? 0;
+  const bodyCols = body.reduce((max, row) => Math.max(max, row.length), 0);
+
+  // 表头常比数据行少一列（数据行行首多一个序号），按数据行列数对齐
+  const offset = hasHeader ? Math.max(0, bodyCols - header.length) : 0;
+  const align = (index: number) =>
+    index < 0 ? -1 : Math.min(index + offset, Math.max(0, bodyCols - 1));
+
+  let nameIndex = align(findColumn(header, NAME_KEYS));
+  let powerIndex = align(findColumn(header, POWER_KEYS));
+  let meritIndex = align(findColumn(header, MERIT_KEYS));
+  let seqIndex = align(findColumn(header, SEQ_KEYS));
+
+  // 兜底：按表头定位到的列明显不是名字 / 不是数字，就按内容重新猜
+  if (nameIndex < 0 || numericRatioOf(body, nameIndex) > 0.5) {
+    nameIndex = pickNameColumn(body, bodyCols);
   }
-  if (powerIndex < 0) {
-    powerIndex = header.length - 1;
+  if (
+    powerIndex < 0 ||
+    powerIndex === nameIndex ||
+    numericRatioOf(body, powerIndex) < 0.5
+  ) {
+    powerIndex = pickNumberColumn(body, bodyCols, nameIndex);
+  }
+  if (meritIndex >= 0 && (numericRatioOf(body, meritIndex) < 0.5 || meritIndex === nameIndex)) {
+    meritIndex = -1;
+  }
+  if (seqIndex >= 0 && numericRatioOf(body, seqIndex) < 0.5) {
+    seqIndex = -1;
   }
 
   const players: HeituPlayer[] = [];
