@@ -2,7 +2,12 @@
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-const url = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").trim();
+/** 容忍结尾斜杠、空格等常见粘贴误差 */
+function normalizeUrl(raw: string | undefined): string {
+  return (raw ?? "").trim().replace(/\/+$/, "");
+}
+
+const url = normalizeUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
 const anonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "").trim();
 
 /** 是否填了真实的 Supabase 地址与密钥（否则走「未配置」降级提示） */
