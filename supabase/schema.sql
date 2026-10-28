@@ -142,14 +142,14 @@ begin
       jsonb_build_object(
         'registrations', (select count(*) from auth.users u where u.created_at >= date_trunc('day', now())),
         'views',         (select count(*) from public.page_views v where v.created_at >= date_trunc('day', now())),
-        'visitors',      (select count(distinct v.user_id) from public.page_views v where v.created_at >= date_trunc('day', now())),
-        'battles',       (select coalesce(sum(jsonb_array_length(coalesce(ud.payload -> 'battles', '[]'::jsonb))), 0) from public.user_data ud)
+        'visitors',      (select count(distinct v.user_id) from public.page_views v where v.created_at >= date_trunc('day', now()))
       ),
     'total',
       jsonb_build_object(
         'registrations', (select count(*) from auth.users),
         'users',         (select count(*) from public.profiles),
         'views',         (select count(*) from public.page_views),
+        'battles',       (select coalesce(sum(jsonb_array_length(coalesce(ud.payload -> 'battles', '[]'::jsonb))), 0) from public.user_data ud),
         'dataBytes',     (select coalesce(sum(length(ud.payload::text)), 0) from public.user_data ud)
       ),
     'yesterday',
@@ -162,7 +162,7 @@ begin
                              and v.created_at <  date_trunc('day', now()))
       ),
     'registrationTrend', (
-      select coalesce(jsonb_agg(jsonb_build_object('day', to_char(d, 'MM-DD'), 'value', coalesce(c, 0)) order by d), '[]'::jsonb)
+      select coalesce(jsonb_agg(jsonb_build_object('day', to_char(d, 'YYYY-MM-DD'), 'count', coalesce(c, 0)) order by d), '[]'::jsonb)
       from generate_series(current_date - 6, current_date, interval '1 day') d
       left join (
         select date_trunc('day', created_at) as day, count(*) as c
@@ -170,7 +170,7 @@ begin
       ) u on u.day = d
     ),
     'viewTrend', (
-      select coalesce(jsonb_agg(jsonb_build_object('day', to_char(d, 'MM-DD'), 'value', coalesce(c, 0)) order by d), '[]'::jsonb)
+      select coalesce(jsonb_agg(jsonb_build_object('day', to_char(d, 'YYYY-MM-DD'), 'count', coalesce(c, 0)) order by d), '[]'::jsonb)
       from generate_series(current_date - 6, current_date, interval '1 day') d
       left join (
         select date_trunc('day', created_at) as day, count(*) as c

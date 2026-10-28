@@ -43,8 +43,14 @@ interface StatUser {
 }
 
 interface AdminStats {
-  today: { registrations: number; views: number; visitors: number; battles: number };
-  total: { registrations: number; users: number; views: number; dataBytes: number };
+  today: { registrations: number; views: number; visitors: number };
+  total: {
+    registrations: number;
+    users: number;
+    views: number;
+    battles: number;
+    dataBytes: number;
+  };
   yesterday: { registrations: number; views: number };
   registrationTrend: DayPoint[];
   viewTrend: DayPoint[];
@@ -228,7 +234,7 @@ export default function ConsoleClient() {
                 icon={<Database className="h-4 w-4" />}
                 label="云端数据量"
                 value={formatBytes(stats.total.dataBytes)}
-                hint={`今日新增战报 ${stats.today.battles}`}
+                hint={`累计战报 ${stats.total.battles} 场`}
                 raw
               />
             </section>
@@ -311,8 +317,8 @@ export default function ConsoleClient() {
                     value={stats.today.visitors}
                   />
                   <SummaryRow
-                    label="今日新增战报"
-                    value={stats.today.battles}
+                    label="累计战报"
+                    value={stats.total.battles}
                   />
                 </dl>
                 <p className="mt-5 flex items-start gap-1.5 rounded-lg bg-[var(--surface-2)] px-3 py-2 text-[11px] leading-relaxed text-[var(--ink-2)]">
