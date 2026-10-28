@@ -2,12 +2,17 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
+  useRef,
+  useState,
   type ReactNode,
 } from "react";
 import { useLocalStorage } from "@/lib/use-local-storage";
+import { useAuth } from "@/lib/auth-provider";
+import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import type {
   Battle,
   Player,
@@ -40,6 +45,16 @@ interface AppState {
   importRoster: (rows: { name: string; rank?: number; merit?: number }[]) => void;
   // 派生数据
   rankings: ReturnType<typeof calculateRankings>;
+  // 云同步状态
+  syncStatus: SyncStatus;
+}
+
+export type SyncStatus = "local" | "loading" | "syncing" | "synced" | "error";
+
+interface CloudPayload {
+  players?: Player[];
+  battles?: Battle[];
+  config?: ScoreConfig;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -56,6 +71,105 @@ export function AppProvider({ children }: AppProviderProps) {
     DEFAULT_CONFIG
   );
   const [logs, setLogs] = useLocalStorage<ScoreLog[]>("sgLogs", []);
+
+  const { user } = useAuth();
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("local");
+  const hydratedRef = useRef(false);
+  const applyingRef = useRef(false);
+
+  // 把当前数据推到云端
+  const pushToCloud = useCallback(async () => {
+    if (!user || !isSupabaseConfigured) return;
+    const payload: CloudPayload = { players, battles, config };
+    const { error } = await getSupabase()
+      .from("user_data")
+      .upsert(
+        { user_id: user.id, payload, updated_at: new Date().toISOString() },
+        { onConflict: "user_id" }
+      );
+    if (error) {
+      console.warn("[sync] 保存失败:", error.message);
+      setSyncStatus("error");
+    } else {
+      setSyncStatus("synced");
+    }
+  }, [user, players, battles, config]);
+
+  // 登录后：拉取云端数据；云端为空就把本机数据传上去（首次迁移）
+  useEffect(() => {
+    if (!isSupabaseConfigured || !user) {
+      hydratedRef.current = false;
+      queueMicrotask(() => setSyncStatus("local"));
+      return;
+    }
+
+    let cancelled = false;
+    hydratedRef.current = false;
+    queueMicrotask(() => setSyncStatus("loading"));
+
+    void (async () => {
+      const { data, error } = await getSupabase()
+        .from("user_data")
+        .select("payload")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (error) {
+        console.warn("[sync] 读取失败:", error.message);
+        hydratedRef.current = true;
+        setSyncStatus("error");
+        return;
+      }
+
+      const payload = (data?.payload ?? null) as CloudPayload | null;
+      const hasCloud =
+        !!payload &&
+        ((payload.players?.length ?? 0) > 0 ||
+          (payload.battles?.length ?? 0) > 0);
+
+      if (hasCloud) {
+        applyingRef.current = true;
+        if (Array.isArray(payload!.players)) setPlayers(payload!.players);
+        if (Array.isArray(payload!.battles)) setBattles(payload!.battles);
+        if (payload!.config) setConfig({ ...DEFAULT_CONFIG, ...payload!.config });
+        setTimeout(() => {
+          applyingRef.current = false;
+        }, 0);
+        hydratedRef.current = true;
+        setSyncStatus("synced");
+        return;
+      }
+
+      // 云端还没有数据：把本机的名单/战报传上去
+      hydratedRef.current = true;
+      if (players.length > 0 || battles.length > 0) {
+        void pushToCloud();
+      } else {
+        setSyncStatus("synced");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // 只在登录账号变化时重新装载云端数据
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, setPlayers, setBattles, setConfig]);
+
+  // 数据变化后自动保存（防抖 900ms）
+  useEffect(() => {
+    if (!user || !isSupabaseConfigured) return;
+    if (!hydratedRef.current || applyingRef.current) return;
+
+    queueMicrotask(() => setSyncStatus("syncing"));
+    const timer = setTimeout(() => {
+      void pushToCloud();
+    }, 900);
+
+    return () => clearTimeout(timer);
+  }, [user, players, battles, config, pushToCloud]);
 
   const rankings = useMemo(
     () => calculateRankings(players, battles, config),
@@ -75,6 +189,7 @@ export function AppProvider({ children }: AppProviderProps) {
     config,
     logs,
     rankings,
+    syncStatus,
 
     addPlayer: (player) => {
       setPlayers((prev) => {

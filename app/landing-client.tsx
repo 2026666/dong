@@ -1,27 +1,38 @@
 "use client";
 
 /**
- * /xuanchuan —— 品牌宣传页（无登录）
+ * 首页 —— 品牌宣传 + 账号登录 / 注册
  * ---------------------------------------------------------------------------
  * 结构：
  *   · 深蓝渐变 + 网格 + 光斑的整屏背景
  *   · 左侧：slogan、产品简介、能力清单、信任点
- *   · 右侧：一张毛玻璃卡，一个「进入系统」按钮，直接进 /zhu
- * 数据全部存在本机浏览器（localStorage），不需要账号。
+ *   · 右侧：毛玻璃卡片，登录 / 注册两个 tab
+ * 登录成功后由 AuthGate 跳转到 /zhu（或 ?next= 指定的页面）
  */
 
-import Link from "next/link";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowRight,
   Calculator,
   CheckCircle2,
+  Cloud,
   FileSpreadsheet,
+  Eye,
+  EyeOff,
+  Loader2,
   Lock,
   ScanLine,
+  ShieldCheck,
   Trophy,
-  Unlock,
-  Zap,
+  User,
 } from "lucide-react";
+import { useAuth } from "@/lib/auth-provider";
+import {
+  validateConfirm,
+  validatePassword,
+  validateUsername,
+} from "@/lib/account";
 
 /** 左侧能力清单 */
 const FEATURES = [
@@ -32,12 +43,63 @@ const FEATURES = [
 ] as const;
 
 const INSURANCE = [
-  "数据只存在这台设备的浏览器里，刷新、换页都不会丢",
-  "想换设备就用「导出 Excel」存一份榜单，再导入新设备",
-  "不上传服务器，也不需要注册账号",
+  { icon: Cloud, text: "名单和战报自动同步到云端，换电脑、换手机都能接着用" },
+  { icon: ShieldCheck, text: "每个账号一份数据，别人看不到、也改不了" },
+  { icon: CheckCircle2, text: "账号密码登录，不需要邮箱验证" },
 ];
 
+type Mode = "login" | "register";
+
 export default function LandingClient() {
+  const router = useRouter();
+  const { signIn, signUp, configured } = useAuth();
+
+  const [mode, setMode] = useState<Mode>("login");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const isRegister = mode === "register";
+
+  function switchMode(next: Mode) {
+    if (next === mode) return;
+    setMode(next);
+    setError(null);
+    setConfirm("");
+  }
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+    setError(null);
+
+    const usernameError = validateUsername(username);
+    if (usernameError) return setError(usernameError);
+
+    const passwordError = validatePassword(password);
+    if (passwordError) return setError(passwordError);
+
+    if (isRegister) {
+      const confirmError = validateConfirm(password, confirm);
+      if (confirmError) return setError(confirmError);
+    }
+
+    setBusy(true);
+    const result = isRegister
+      ? await signUp(username, password)
+      : await signIn(username, password);
+    setBusy(false);
+
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    router.replace("/zhu");
+  }
+
   return (
     <div className="relative isolate min-h-screen w-full overflow-hidden bg-[#04091a] text-white">
       {/* ---------- 背景 ---------- */}
@@ -71,8 +133,8 @@ export default function LandingClient() {
 
       {/* ---------- 顶栏 ---------- */}
       <header className="relative z-10 mx-auto flex w-full max-w-6xl items-center justify-between px-5 pt-6 sm:px-8">
-        <Link href="/zhu" className="group flex items-center gap-3 rounded-xl py-1">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-[linear-gradient(135deg,#2563eb,#38bdf8)] shadow-[0_12px_32px_-12px_rgba(56,189,248,0.9)] transition-transform duration-200 group-hover:rotate-[-4deg]">
+        <div className="flex items-center gap-3 py-1">
+          <span className="grid h-10 w-10 place-items-center rounded-xl bg-[linear-gradient(135deg,#2563eb,#38bdf8)] shadow-[0_12px_32px_-12px_rgba(56,189,248,0.9)]">
             <Trophy className="h-5 w-5 text-white" strokeWidth={2.2} />
           </span>
           <span className="leading-tight">
@@ -83,12 +145,12 @@ export default function LandingClient() {
               盟战统计
             </span>
           </span>
-        </Link>
+        </div>
 
         <div className="flex items-center gap-2">
-          <span className="hidden items-center gap-1.5 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1 text-[11px] text-emerald-200 backdrop-blur sm:inline-flex">
-            <Unlock className="h-3.5 w-3.5 text-emerald-300" />
-            免登录使用
+          <span className="hidden items-center gap-1.5 rounded-full border border-[#38bdf8]/25 bg-[#38bdf8]/10 px-3 py-1 text-[11px] text-[#7dd3fc] backdrop-blur sm:inline-flex">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            数据云端同步
           </span>
           <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-slate-300 backdrop-blur">
             规则 v1.0
@@ -115,7 +177,7 @@ export default function LandingClient() {
 
           <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-slate-300/90 sm:text-base">
             上传参战截图，OCR 自动提取成员名字；基础分、车头加分按盟内规则实时结算，
-            总分相同时再按赛季功勋排序。把算分这件事，交给系统。
+            总分相同时再按赛季功勋排序。名单自动存云端，换设备也不丢。
           </p>
 
           <ul className="mt-8 grid max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
@@ -142,16 +204,16 @@ export default function LandingClient() {
           <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-2 text-[12px] text-slate-400">
             <span className="inline-flex items-center gap-1.5">
               <Lock className="h-3.5 w-3.5" />
-              数据只存在本机浏览器
+              每个账号独立存储
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <Zap className="h-3.5 w-3.5" />
-              无需上传服务器
+              <Cloud className="h-3.5 w-3.5" />
+              登录后自动同步
             </span>
           </div>
         </section>
 
-        {/* 右：进入系统 */}
+        {/* 右：登录 / 注册 */}
         <section className="lp-fade-up lp-delay-2 w-full">
           <div className="relative overflow-hidden rounded-3xl border border-white/12 bg-white/[0.055] p-6 shadow-[0_30px_90px_-32px_rgba(2,6,23,0.95)] backdrop-blur-2xl sm:p-7">
             <div
@@ -160,34 +222,160 @@ export default function LandingClient() {
             />
 
             <div className="relative">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-2.5 py-0.5 text-[11px] text-emerald-200">
-                <Unlock className="h-3 w-3" />
-                免登录使用
-              </span>
-
-              <h2 className="mt-4 text-xl font-semibold tracking-tight">
-                直接进入工作台
+              <h2 className="text-xl font-semibold tracking-tight">
+                {isRegister ? "创建账号" : "欢迎回来"}
               </h2>
               <p className="mt-1 text-[13px] leading-relaxed text-slate-400">
-                不用注册、不用填表单，点下面的按钮就能开始用。
+                {isRegister
+                  ? "第一个注册的账号会自动成为管理员。"
+                  : "登录后即可继续你的盟战统计。"}
               </p>
 
-              <Link
-                href="/zhu"
-                className="group/cta mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[linear-gradient(135deg,#2563eb,#38bdf8)] px-4 py-3 text-[14px] font-medium text-white shadow-[0_16px_40px_-16px_rgba(56,189,248,0.95)] transition-transform duration-200 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99]"
-              >
-                进入系统
-                <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover/cta:translate-x-0.5" />
-              </Link>
+              {/* tab */}
+              <div className="relative mt-5 grid grid-cols-2 rounded-xl border border-white/10 bg-white/[0.04] p-1">
+                <span
+                  aria-hidden
+                  className="absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-lg bg-[linear-gradient(135deg,#2563eb,#38bdf8)] shadow-[0_8px_20px_-8px_rgba(56,189,248,0.9)] transition-transform duration-300"
+                  style={{
+                    transform: isRegister
+                      ? "translateX(calc(100% + 0.5rem))"
+                      : "translateX(0)",
+                  }}
+                />
+                {(
+                  [
+                    ["login", "登录"],
+                    ["register", "注册"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => switchMode(value)}
+                    className={`relative z-10 rounded-lg py-2 text-[13px] font-medium transition-colors ${
+                      mode === value
+                        ? "text-white"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
 
-              <ul className="mt-6 space-y-2.5 text-[12px] leading-relaxed text-slate-400">
-                {INSURANCE.map((item) => (
-                  <li key={item} className="flex items-start gap-2">
-                    <CheckCircle2
+              {!configured && (
+                <p className="mt-4 rounded-xl border border-amber-300/25 bg-amber-400/10 px-3 py-2 text-[12px] leading-relaxed text-amber-100">
+                  还没配置 Supabase：请在 `dong/.env.local` 填入
+                  `NEXT_PUBLIC_SUPABASE_URL` 与 `NEXT_PUBLIC_SUPABASE_ANON_KEY`，
+                  重新构建后即可注册登录。
+                </p>
+              )}
+
+              <form onSubmit={handleSubmit} className="mt-5 space-y-3.5">
+                <Field
+                  id="account"
+                  label="账号"
+                  icon={<User className="h-4 w-4" />}
+                >
+                  <input
+                    id="account"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="2~16 位中文 / 字母 / 数字"
+                    autoComplete="username"
+                    className="w-full bg-transparent text-[14px] text-white placeholder:text-slate-500 focus:outline-none"
+                  />
+                </Field>
+
+                <Field
+                  id="password"
+                  label="密码"
+                  icon={<Lock className="h-4 w-4" />}
+                  trailing={
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                      className="text-slate-500 transition-colors hover:text-slate-300"
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  }
+                >
+                  <input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder={isRegister ? "至少 6 位" : "请输入密码"}
+                    autoComplete={isRegister ? "new-password" : "current-password"}
+                    className="w-full bg-transparent text-[14px] text-white placeholder:text-slate-500 focus:outline-none"
+                  />
+                </Field>
+
+                {isRegister && (
+                  <Field
+                    id="confirm"
+                    label="确认密码"
+                    icon={<Lock className="h-4 w-4" />}
+                  >
+                    <input
+                      id="confirm"
+                      type={showPassword ? "text" : "password"}
+                      value={confirm}
+                      onChange={(e) => setConfirm(e.target.value)}
+                      placeholder="再输入一次密码"
+                      autoComplete="new-password"
+                      className="w-full bg-transparent text-[14px] text-white placeholder:text-slate-500 focus:outline-none"
+                    />
+                  </Field>
+                )}
+
+                {error && (
+                  <p
+                    role="alert"
+                    className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-[12px] leading-relaxed text-red-200"
+                  >
+                    {error}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="group/cta relative mt-1 inline-flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-[linear-gradient(135deg,#2563eb,#38bdf8)] px-4 py-3 text-[14px] font-medium text-white shadow-[0_16px_40px_-16px_rgba(56,189,248,0.95)] transition-transform duration-200 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  <span
+                    aria-hidden
+                    className="absolute inset-0 bg-[linear-gradient(135deg,#3b82f6,#67e8f9)] opacity-0 transition-opacity duration-300 group-hover/cta:opacity-100"
+                  />
+                  <span className="relative inline-flex items-center gap-2">
+                    {busy ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover/cta:translate-x-0.5" />
+                    )}
+                    {busy
+                      ? "请稍候…"
+                      : isRegister
+                        ? "注册并进入"
+                        : "登录并进入"}
+                  </span>
+                </button>
+              </form>
+
+              <ul className="mt-5 space-y-2 text-[12px] leading-relaxed text-slate-400">
+                {INSURANCE.map(({ icon: Icon, text }) => (
+                  <li key={text} className="flex items-start gap-2">
+                    <Icon
                       className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300/90"
                       strokeWidth={2.2}
                     />
-                    {item}
+                    {text}
                   </li>
                 ))}
               </ul>
@@ -197,10 +385,41 @@ export default function LandingClient() {
       </main>
 
       <footer className="relative z-10 mx-auto w-full max-w-6xl px-5 pb-10 text-center text-[11px] tracking-wide text-slate-500 sm:px-8">
-        三国冰河 · 盟战统计　|　数据保存在本机浏览器
+        三国冰河 · 盟战统计　|　数据同步至云端，仅本人可见
       </footer>
 
       <style>{KEYFRAMES}</style>
+    </div>
+  );
+}
+
+/** 带图标与标签的输入框外壳 */
+function Field({
+  id,
+  label,
+  icon,
+  trailing,
+  children,
+}: {
+  id: string;
+  label: string;
+  icon: React.ReactNode;
+  trailing?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label
+        htmlFor={id}
+        className="mb-1.5 block text-[12px] font-medium text-slate-300"
+      >
+        {label}
+      </label>
+      <div className="flex items-center gap-2.5 rounded-xl border border-white/12 bg-white/[0.04] px-3 py-2.5 transition-colors focus-within:border-[#38bdf8]/60 focus-within:bg-white/[0.07]">
+        <span className="text-slate-500">{icon}</span>
+        {children}
+        {trailing}
+      </div>
     </div>
   );
 }
@@ -221,13 +440,6 @@ const KEYFRAMES = `
 @keyframes lp-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50%      { opacity: 0.45; transform: scale(0.82); }
-}
-@keyframes lp-shake {
-  10%, 90% { transform: translateX(-1px); }
-  20%, 80% { transform: translateX(2px); }
-  30%, 70% { transform: translateX(-3px); }
-  40%, 60% { transform: translateX(3px); }
-  50%      { transform: translateX(-2px); }
 }
 .lp-fade-up   { animation: lp-fade-up 0.72s cubic-bezier(0.22, 1, 0.36, 1) both; }
 .lp-delay-2   { animation-delay: 0.18s; }

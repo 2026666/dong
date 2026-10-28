@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Trophy, Upload, Settings, List, Users, LayoutGrid } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useApp } from "@/lib/app-context";
+import { AccountChip } from "./account-chip";
 
 const navItems = [
   { href: "/zhu", label: "主页", icon: LayoutGrid },
@@ -59,7 +61,35 @@ export function NavBar() {
             );
           })}
         </nav>
+
+        <SyncBadge />
+        <AccountChip />
       </div>
     </header>
+  );
+}
+
+/** 云端同步状态的小圆点 */
+function SyncBadge() {
+  const { syncStatus } = useApp();
+
+  const map = {
+    local: { text: "仅本机", className: "bg-[var(--muted)]" },
+    loading: { text: "同步中…", className: "bg-[var(--gold)] animate-pulse" },
+    syncing: { text: "保存中…", className: "bg-[var(--gold)] animate-pulse" },
+    synced: { text: "已同步", className: "bg-emerald-500" },
+    error: { text: "同步失败", className: "bg-red-500" },
+  } as const;
+
+  const item = map[syncStatus];
+
+  return (
+    <span
+      title={`云端同步：${item.text}`}
+      className="hidden shrink-0 items-center gap-1.5 rounded-full bg-[var(--surface-2)] px-2.5 py-1 text-[11px] font-medium text-[var(--ink-2)] md:inline-flex"
+    >
+      <span className={cn("h-1.5 w-1.5 rounded-full", item.className)} />
+      {item.text}
+    </span>
   );
 }
