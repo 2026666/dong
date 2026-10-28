@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -32,6 +32,7 @@ type PanelSection = { ring: number; names: string[]; cells: number };
 export default function HeituClient() {
   const [level, setLevel] = useState<HeituLevel>(4);
   const [cityName, setCityName] = useState("城");
+  const [angle, setAngle] = useState(0);
   const [rawText, setRawText] = useState("");
   const [players, setPlayers] = useState<HeituPlayer[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
@@ -123,11 +124,67 @@ export default function HeituClient() {
     const titleTop = 44;
     const panelW = 272;
     const panelLeft = 1600 - 32 - panelW;
-    const cardW = panelLeft - 24 - left;
-    const gridW = cardW - pad * 2;
-    const cellSize = Math.floor((gridW - (size - 1) * gap) / size);
-    const gridH = size * cellSize + (size - 1) * gap;
-    const cardH = gridH + pad * 2 + 34;
+    const areaW = panelLeft - 24 - left;
+    const availW = areaW - pad * 2;
+    const baseCell = Math.floor((availW - (size - 1) * gap) / size);
+    const baseGrid = size * baseCell + (size - 1) * gap;
+
+    const W = 1600;
+    const H = 1600;
+    const contentTop = 150;
+    const scale = 2;
+
+    // 旋转：只转中间的格子图，标题 / 图例 / 右侧名单保持水平
+    const rad = (angle * Math.PI) / 180;
+    const cosA = Math.cos(rad);
+    const sinA = Math.sin(rad);
+    const bboxFactor = Math.abs(cosA) + Math.abs(sinA);
+    const innerH = H - contentTop - 96 - pad * 2;
+    const fit = Math.min(
+      1,
+      availW / (baseGrid * bboxFactor),
+      innerH / (baseGrid * bboxFactor),
+    );
+    const side = baseGrid * fit * bboxFactor;
+    const boxH = side + pad * 2 + 34;
+    const cardX = left;
+    const cardW = areaW;
+    const gridCx = cardX + cardW / 2;
+    const gridCy = contentTop + (boxH - 34) / 2;
+    const half = baseGrid / 2;
+    const textScale = Math.max(fit, 0.86);
+    const scaled = (value: number) => Math.max(7, value * textScale);
+
+    /** 格心相对网格中心 → 旋转后的画布坐标 */
+    const toPoint = (bx: number, by: number) => ({
+      x: gridCx + (bx * cosA - by * sinA) * fit,
+      y: gridCy + (bx * sinA + by * cosA) * fit,
+    });
+
+    /** 以网格中心为原点画一个会跟着旋转的圆角矩形 */
+    const paintCell = (
+      bx: number,
+      by: number,
+      w: number,
+      h: number,
+      radius: number,
+      fill: string,
+      stroke: string,
+      dashed = false,
+    ) => {
+      ctx.save();
+      ctx.translate(gridCx, gridCy);
+      ctx.rotate(rad);
+      ctx.scale(fit, fit);
+      roundRect(ctx, bx - w / 2, by - h / 2, w, h, radius);
+      ctx.fillStyle = fill;
+      ctx.fill();
+      if (dashed) ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = stroke;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    };
 
     // 量一下右侧名单需要多高
     const measure = document.createElement("canvas").getContext("2d");
@@ -152,12 +209,6 @@ export default function HeituClient() {
       if (line) lines.push(line);
       sectionLines.push({ ...section, lines });
     });
-
-    const W = 1600;
-    const H = 1600;
-    const boxH = cardH;
-    const contentTop = 150;
-    const scale = 2;
 
     canvas.width = W * scale;
     canvas.height = H * scale;
@@ -186,17 +237,16 @@ export default function HeituClient() {
     ctx.fillText(sub, left, titleTop + 74);
 
     // 网格卡片
-    roundRect(ctx, left, contentTop, cardW, boxH, 18);
+    roundRect(ctx, cardX, contentTop, cardW, boxH, 18);
     ctx.fillStyle = "#ffffff";
     ctx.fill();
     ctx.strokeStyle = "#e8e8e5";
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    const gridX = left + pad;
-    const gridY = contentTop + pad;
+    const gridX = cardX + pad;
 
-    // 格子
+    // 格子：先画会旋转的色块，再画保持水平的名字
     for (let row = 0; row < size; row += 1) {
       for (let col = 0; col < size; col += 1) {
         const dr = row - center;
@@ -204,22 +254,41 @@ export default function HeituClient() {
         const ringOffset = Math.max(Math.abs(dr), Math.abs(dc));
         if (ringOffset <= 1) continue;
 
-        const x = gridX + col * (cellSize + gap);
-        const y = gridY + row * (cellSize + gap);
+        const bx = col * (baseCell + gap) + baseCell / 2 - half;
+        const by = row * (baseCell + gap) + baseCell / 2 - half;
         const isGap = level !== 4 && dr === -center;
 
         if (isGap) {
-          roundRect(ctx, x, y, cellSize, cellSize, 9);
-          ctx.fillStyle = "#ffffff";
-          ctx.fill();
-          ctx.setLineDash([4, 4]);
-          ctx.strokeStyle = "#d7d2c9";
-          ctx.stroke();
-          ctx.setLineDash([]);
+          paintCell(bx, by, baseCell, baseCell, 9, "#ffffff", "#d7d2c9", true);
+          continue;
+        }
+
+        const ring = ringOffset - 1;
+        const style = RING_COLORS[ring] ?? RING_COLORS[3];
+        paintCell(bx, by, baseCell, baseCell, 9, style.bg, style.border);
+      }
+    }
+
+    // 城池底板（跟着转）
+    const cityHalf = (3 * baseCell + 2 * gap) / 2;
+    paintCell(0, 0, cityHalf * 2, cityHalf * 2, 14, DARK, DARK);
+
+    // 名字层：位置跟着格子转，文字保持正立
+    for (let row = 0; row < size; row += 1) {
+      for (let col = 0; col < size; col += 1) {
+        const dr = row - center;
+        const dc = col - center;
+        const ringOffset = Math.max(Math.abs(dr), Math.abs(dc));
+        if (ringOffset <= 1) continue;
+        if (level !== 4 && dr === -center) {
+          const point = toPoint(
+            col * (baseCell + gap) + baseCell / 2 - half,
+            row * (baseCell + gap) + baseCell / 2 - half,
+          );
           ctx.fillStyle = "#b8b2a8";
-          ctx.font = '11px "Microsoft YaHei", sans-serif';
+          ctx.font = `${scaled(11)}px "Microsoft YaHei", sans-serif`;
           ctx.textAlign = "center";
-          ctx.fillText("缺一层", x + cellSize / 2, y + cellSize / 2 + 4);
+          ctx.fillText("缺一层", point.x, point.y + scaled(4));
           ctx.textAlign = "left";
           continue;
         }
@@ -228,18 +297,16 @@ export default function HeituClient() {
         const style = RING_COLORS[ring] ?? RING_COLORS[3];
         const index = cells.findIndex((cell) => cell.row === row && cell.col === col);
         const names = index >= 0 ? slots[index] : [];
-
-        roundRect(ctx, x, y, cellSize, cellSize, 9);
-        ctx.fillStyle = style.bg;
-        ctx.fill();
-        ctx.strokeStyle = style.border;
-        ctx.stroke();
+        const point = toPoint(
+          col * (baseCell + gap) + baseCell / 2 - half,
+          row * (baseCell + gap) + baseCell / 2 - half,
+        );
 
         if (!names.length) {
           ctx.fillStyle = "#c4beb6";
-          ctx.font = '13px "Microsoft YaHei", sans-serif';
+          ctx.font = `${scaled(13)}px "Microsoft YaHei", sans-serif`;
           ctx.textAlign = "center";
-          ctx.fillText("—", x + cellSize / 2, y + cellSize / 2 + 5);
+          ctx.fillText("—", point.x, point.y + scaled(5));
           ctx.textAlign = "left";
           continue;
         }
@@ -248,46 +315,39 @@ export default function HeituClient() {
         const overflow = names.length - visible.length;
         const fonts =
           visible.length >= 3 ? [12, 11, 10] : visible.length === 2 ? [13.5, 12] : [16];
-        const lineH = Math.round(fonts[0] * 1.42);
-        const totalH = visible.length * lineH + (overflow > 0 ? 13 : 0);
-        let cursorY = y + cellSize / 2 - totalH / 2 + Math.round(fonts[0] * 0.78);
+        const lineH = Math.round(fonts[0] * textScale * 1.42);
+        const totalH = visible.length * lineH + (overflow > 0 ? 13 * textScale : 0);
+        let cursorY =
+          point.y - totalH / 2 + Math.round(fonts[0] * textScale * 0.78);
 
         visible.forEach((name, layer) => {
           const base = fonts[layer] ?? 10;
-          const font = fitFont(ctx, name, cellSize - 14, base);
+          const font = fitFont(ctx, name, (baseCell - 14) * fit, base * textScale);
           ctx.font = `${layer === 0 ? 600 : 400} ${font}px "Microsoft YaHei", "PingFang SC", sans-serif`;
           ctx.fillStyle = layer === 0 ? style.ink : "#6b6b73";
           ctx.textAlign = "center";
-          ctx.fillText(name, x + cellSize / 2, cursorY);
+          ctx.fillText(name, point.x, cursorY);
           cursorY += lineH;
         });
 
         if (overflow > 0) {
-          ctx.font = '10px "Microsoft YaHei", sans-serif';
+          ctx.font = `${scaled(10)}px "Microsoft YaHei", sans-serif`;
           ctx.fillStyle = "#8e8e93";
           ctx.textAlign = "center";
-          ctx.fillText(`+${overflow} 人`, x + cellSize / 2, cursorY + 2);
+          ctx.fillText(`+${overflow} 人`, point.x, cursorY + scaled(2));
         }
         ctx.textAlign = "left";
       }
     }
 
-    // 城池（中心 3×3）
-    const cityCol = center - 1;
-    const cityRow = center - 1;
-    const cityX = gridX + cityCol * (cellSize + gap);
-    const cityY = gridY + cityRow * (cellSize + gap);
-    const cityW = cellSize * 3 + gap * 2;
-    roundRect(ctx, cityX, cityY, cityW, cityW, 14);
-    ctx.fillStyle = DARK;
-    ctx.fill();
+    // 城池文字（正立）
     ctx.fillStyle = "#ffffff";
-    ctx.font = '600 26px "Microsoft YaHei", "PingFang SC", sans-serif';
+    ctx.font = `600 ${scaled(26)}px "Microsoft YaHei", "PingFang SC", sans-serif`;
     ctx.textAlign = "center";
-    ctx.fillText(cityName || "城", cityX + cityW / 2, cityY + cityW / 2 + 4);
+    ctx.fillText(cityName || "城", gridCx, gridCy + scaled(4));
     ctx.fillStyle = "#c9c9c4";
-    ctx.font = '12px "Microsoft YaHei", sans-serif';
-    ctx.fillText(`${level} 级城 · 3×3`, cityX + cityW / 2, cityY + cityW / 2 + 26);
+    ctx.font = `${scaled(12)}px "Microsoft YaHei", sans-serif`;
+    ctx.fillText(`${level} 级城 · 3×3`, gridCx, gridCy + scaled(26));
     ctx.textAlign = "left";
 
     // 图例
@@ -381,7 +441,7 @@ export default function HeituClient() {
     ctx.fillStyle = "#b8b2a8";
     ctx.font = '11px "Microsoft YaHei", sans-serif';
     ctx.fillText("三国冰河 · 盟战统计", left, H - 16);
-  }, [level, cityName, ordered, cells, slots, sections, stats.rounds]);
+  }, [level, cityName, angle, ordered, cells, slots, sections, stats.rounds]);
 
   const download = () => {
     const canvas = canvasRef.current;
@@ -461,6 +521,44 @@ export default function HeituClient() {
               })}
             </div>
           </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-2)]/60 px-3 py-2.5">
+          <span className="text-[12px] text-[var(--ink-2)]">旋转角度</span>
+          <input
+            type="range"
+            min={-45}
+            max={45}
+            step={5}
+            value={angle}
+            onChange={(event) => setAngle(Number(event.target.value))}
+            className="h-1.5 w-40 cursor-pointer accent-[var(--btn-bg)]"
+            aria-label="格子图旋转角度"
+          />
+          <span className="w-10 text-[12px] tabular-nums text-[var(--ink)]">{angle}°</span>
+          {[
+            { value: 0, label: "0°" },
+            { value: -45, label: "斜放 -45°" },
+            { value: -30, label: "-30°" },
+            { value: -15, label: "-15°" },
+            { value: 15, label: "15°" },
+            { value: 30, label: "30°" },
+            { value: 45, label: "斜放 45°" },
+          ].map((preset) => (
+            <button
+              key={preset.value}
+              type="button"
+              onClick={() => setAngle(preset.value)}
+              className={`rounded-lg border px-2 py-1 text-[11.5px] transition-colors ${
+                preset.value === angle
+                  ? "border-transparent bg-[var(--btn-bg)] text-[var(--btn-fg)]"
+                  : "border-[var(--line)] bg-[var(--surface)] text-[var(--ink-2)] hover:bg-[var(--surface-2)]"
+              }`}
+            >
+              {preset.label}
+            </button>
+          ))}
+          <span className="text-[11.5px] text-[var(--muted)]">只转中间格子图，标题和图例保持水平</span>
         </div>
 
         <div className="mt-5">
