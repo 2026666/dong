@@ -1,30 +1,30 @@
-/** 账号（用户名）与 Supabase 内部邮箱之间的转换、校验、错误文案 */
-
-/** 内部邮箱域名：用户只看到「账号」，背后用 账号@dong.local 存 */
-export const EMAIL_DOMAIN = "dong.local";
-
-/** 账号规则：2~16 位，中文 / 字母 / 数字 / 下划线 */
-export const USERNAME_RE = /^[A-Za-z0-9_\u4e00-\u9fa5]{2,16}$/;
+/** 账号（邮箱 + 密码）校验与错误文案翻译 */
 
 export const PASSWORD_MIN = 6;
 export const PASSWORD_MAX = 64;
 
-/** 账号 → 内部邮箱（统一小写，避免大小写重复注册） */
-export function accountToEmail(username: string): string {
-  return `${username.trim().toLowerCase()}@${EMAIL_DOMAIN}`;
+/**
+ * 邮箱格式校验：够用即可。
+ * 用真实邮箱（如 QQ 邮箱）当账号，Supabase 侧不会有「域名非法」的问题。
+ */
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/;
+
+/** 统一小写，避免大小写重复注册 */
+export function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase();
 }
 
-/** 内部邮箱 → 账号 */
-export function emailToAccount(email?: string | null): string {
-  if (!email) return "";
-  const [name] = email.split("@");
-  return name ?? "";
+/** 邮箱前缀当展示昵称 */
+export function displayName(email: string): string {
+  const name = normalizeEmail(email).split("@")[0] ?? "";
+  return name || "盟成员";
 }
 
-export function validateUsername(value: string): string | null {
-  const v = value.trim();
-  if (!v) return "请输入账号";
-  if (!USERNAME_RE.test(v)) return "账号为 2~16 位中文、字母、数字或下划线";
+export function validateEmail(value: string): string | null {
+  const v = normalizeEmail(value);
+  if (!v) return "请输入邮箱";
+  if (v.length > 120) return "邮箱太长了";
+  if (!EMAIL_RE.test(v)) return "邮箱格式不对，例如 12345678@qq.com";
   return null;
 }
 
@@ -42,13 +42,13 @@ export function validateConfirm(password: string, confirm: string): string | nul
 }
 
 const ERROR_MAP: Array<[RegExp, string]> = [
-  [/invalid login credentials/i, "账号或密码不正确"],
-  [/invalid_credentials/i, "账号或密码不正确"],
-  [/email not confirmed/i, "账号还没激活：请在 Supabase 关闭 Confirm email，或让管理员手动确认"],
-  [/user already registered|already been registered/i, "这个账号已经被注册了，直接登录吧"],
-  [/duplicate key value.*profiles_username/i, "这个账号已经被注册了，直接登录吧"],
+  [/invalid login credentials/i, "邮箱或密码不正确"],
+  [/invalid_credentials/i, "邮箱或密码不正确"],
+  [/email not confirmed/i, "这个账号还没激活：请在 Supabase 关闭 Confirm email 后再注册"],
+  [/email_address_invalid/i, "邮箱格式不对，例如 12345678@qq.com"],
+  [/user already registered|already been registered/i, "这个邮箱已经注册过了，直接登录吧"],
   [/password should be at least/i, `密码至少 ${PASSWORD_MIN} 位`],
-  [/unable to validate email address/i, "账号格式不对，请用中文、字母、数字或下划线"],
+  [/unable to validate email address/i, "邮箱格式不对，例如 12345678@qq.com"],
   [/signups not allowed/i, "当前项目已关闭注册，请联系管理员"],
   [/email rate limit exceeded/i, "发送过于频繁，请稍后再试"],
   [/over_email_send_rate_limit/i, "发送过于频繁，请稍后再试"],

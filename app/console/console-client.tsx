@@ -481,7 +481,8 @@ function TrendCard({
       </div>
       <div className="mt-5 flex h-28 items-end gap-2">
         {points.map((p) => {
-          const height = Math.max(2, Math.round((p.count / max) * 100));
+          // 用固定像素高度，避免父级 height:auto 时百分比高度塌陷
+          const height = Math.max(2, Math.round((p.count / max) * 70));
           return (
             <div
               key={p.day}
@@ -493,7 +494,7 @@ function TrendCard({
               <div
                 className="w-full rounded-t-[4px] transition-[height] duration-500"
                 style={{
-                  height: `${height}%`,
+                  height: `${height}px`,
                   backgroundColor:
                     accent === "gold" ? "var(--gold)" : "var(--ink)",
                   opacity: p.count ? 0.9 : 0.15,

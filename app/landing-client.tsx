@@ -30,8 +30,8 @@ import {
 import { useAuth } from "@/lib/auth-provider";
 import {
   validateConfirm,
+  validateEmail,
   validatePassword,
-  validateUsername,
 } from "@/lib/account";
 
 /** 左侧能力清单 */
@@ -45,7 +45,7 @@ const FEATURES = [
 const INSURANCE = [
   { icon: Cloud, text: "名单和战报自动同步到云端，换电脑、换手机都能接着用" },
   { icon: ShieldCheck, text: "每个账号一份数据，别人看不到、也改不了" },
-  { icon: CheckCircle2, text: "账号密码登录，不需要邮箱验证" },
+  { icon: CheckCircle2, text: "邮箱 + 密码登录，不收验证邮件" },
 ];
 
 type Mode = "login" | "register";
@@ -55,7 +55,7 @@ export default function LandingClient() {
   const { signIn, signUp, configured } = useAuth();
 
   const [mode, setMode] = useState<Mode>("login");
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -76,8 +76,8 @@ export default function LandingClient() {
     if (busy) return;
     setError(null);
 
-    const usernameError = validateUsername(username);
-    if (usernameError) return setError(usernameError);
+    const emailError = validateEmail(email);
+    if (emailError) return setError(emailError);
 
     const passwordError = validatePassword(password);
     if (passwordError) return setError(passwordError);
@@ -89,8 +89,8 @@ export default function LandingClient() {
 
     setBusy(true);
     const result = isRegister
-      ? await signUp(username, password)
-      : await signIn(username, password);
+      ? await signUp(email, password)
+      : await signIn(email, password);
     setBusy(false);
 
     if (result.error) {
@@ -274,15 +274,19 @@ export default function LandingClient() {
               <form onSubmit={handleSubmit} className="mt-5 space-y-3.5">
                 <Field
                   id="account"
-                  label="账号"
+                  label="邮箱"
                   icon={<User className="h-4 w-4" />}
                 >
                   <input
                     id="account"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="2~16 位中文 / 字母 / 数字"
-                    autoComplete="username"
+                    type="email"
+                    inputMode="email"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="12345678@qq.com"
+                    autoComplete="email"
                     className="w-full bg-transparent text-[14px] text-white placeholder:text-slate-500 focus:outline-none"
                   />
                 </Field>

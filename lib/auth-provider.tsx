@@ -12,10 +12,11 @@ import {
 import type { User } from "@supabase/supabase-js";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import {
-  accountToEmail,
+  displayName,
+  normalizeEmail,
   translateAuthError,
+  validateEmail,
   validatePassword,
-  validateUsername,
 } from "@/lib/account";
 
 export interface Profile {
@@ -33,8 +34,8 @@ interface AuthContextValue {
   loading: boolean;
   isAdmin: boolean;
   configured: boolean;
-  signIn: (username: string, password: string) => Promise<{ error?: string }>;
-  signUp: (username: string, password: string) => Promise<{ error?: string }>;
+  signIn: (email: string, password: string) => Promise<{ error?: string }>;
+  signUp: (email: string, password: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -105,9 +106,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer);
   }, [user]);
 
-  const signIn = useCallback(async (username: string, password: string) => {
-    const usernameError = validateUsername(username);
-    if (usernameError) return { error: usernameError };
+  const signIn = useCallback(async (email: string, password: string) => {
+    const emailError = validateEmail(email);
+    if (emailError) return { error: emailError };
     const passwordError = validatePassword(password);
     if (passwordError) return { error: passwordError };
     if (!isSupabaseConfigured) {
@@ -115,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const { data, error } = await getSupabase().auth.signInWithPassword({
-      email: accountToEmail(username),
+      email: normalizeEmail(email),
       password,
     });
 
@@ -124,9 +125,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return {};
   }, [loadProfile]);
 
-  const signUp = useCallback(async (username: string, password: string) => {
-    const usernameError = validateUsername(username);
-    if (usernameError) return { error: usernameError };
+  const signUp = useCallback(async (email: string, password: string) => {
+    const emailError = validateEmail(email);
+    if (emailError) return { error: emailError };
     const passwordError = validatePassword(password);
     if (passwordError) return { error: passwordError };
     if (!isSupabaseConfigured) {
@@ -134,9 +135,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const { data, error } = await getSupabase().auth.signUp({
-      email: accountToEmail(username),
+      email: normalizeEmail(email),
       password,
-      options: { data: { username: username.trim() } },
+      options: { data: { username: displayName(email) } },
     });
 
     if (error) return { error: translateAuthError(error.message) };
