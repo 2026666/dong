@@ -12,7 +12,6 @@ import {
   RefreshCw,
   ScanLine,
   Sparkles,
-  X,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useLocalStorage } from "@/lib/use-local-storage";
@@ -21,15 +20,12 @@ import { parseOcrText } from "@/lib/ocr-parser";
 import { preprocessImage } from "@/lib/image-preprocess";
 import {
   OFFICIAL_LIMIT,
-  SUBSTITUTE_LIMIT,
-  addSubstitute,
   assignToSlot,
   buildPlan,
   parseGuanduRows,
   parseGuanduRoster,
   plannedCount,
   plannedNames,
-  removeSubstitute,
   setPlanText,
   setGroupStartTask,
   setTeamTask,
@@ -74,7 +70,11 @@ export default function GuanduClient() {
   const officials = useMemo(() => (plan ? plannedNames(plan) : []), [plan]);
   const placed = useMemo(() => (plan ? plannedCount(plan) : 0), [plan]);
   const slots = useMemo(() => (plan ? slotCount(plan) : 0), [plan]);
-  const bench = plan?.substitutes ?? [];
+  /** 想安排但排不下的（超过 30 个） */
+  const overflow = useMemo(() => {
+    const pool = present.length ? present.length : rosterNames.length;
+    return Math.max(0, pool - OFFICIAL_LIMIT);
+  }, [present.length, rosterNames.length]);
   const unarranged = useMemo(
     () => (plan ? unarrangedNames(plan, rosterNames) : []),
     [plan, rosterNames],
@@ -100,12 +100,7 @@ export default function GuanduClient() {
       const official = presentNames.length
         ? sorted.filter((m) => presentNames.includes(m.name))
         : sorted.slice(0, OFFICIAL_LIMIT);
-      const officialSet = new Set(official.map((m) => m.name));
-      const subs = sorted
-        .filter((m) => !officialSet.has(m.name))
-        .slice(0, SUBSTITUTE_LIMIT)
-        .map((m) => m.name);
-      return buildPlan(official, subs, previous ?? undefined);
+      return buildPlan(official, previous ?? undefined);
     },
     [],
   );
@@ -396,7 +391,7 @@ export default function GuanduClient() {
           <StepBadge n={1} />
           <h2 className="text-[15px] font-semibold">盟员名单</h2>
           <span className="text-[12px] text-[var(--muted)]">
-            实力越高排得越靠前；前 30 进正式，其余按实力进替补
+            实力越高排得越靠前；只安排前 30 个位置，多出来的人不排
           </span>
           <label className="btn btn-ghost ml-auto cursor-pointer px-3 py-1.5 text-[12px]">
             <FileUp className="h-3.5 w-3.5" />
@@ -574,7 +569,7 @@ export default function GuanduClient() {
               ))}
             </div>
             <p className="mt-1.5 text-[11.5px] text-[var(--ink-2)]">
-              如果确实是盟里的人，先补进上面的名单，再重新识别；也可以先把他放进替补，图上会有名字。
+              如果确实是盟里的人，先补进上面的名单，再重新识别；补好之后可以从下拉里直接换进队伍。
             </p>
           </div>
         )}
@@ -586,7 +581,8 @@ export default function GuanduClient() {
           <StepBadge n={3} />
           <h2 className="text-[15px] font-semibold">安排方案</h2>
           <span className="text-[12px] text-[var(--muted)]">
-            正式 {placed} / {Math.max(slots, OFFICIAL_LIMIT)} 人 · 替补 {bench.length}/{SUBSTITUTE_LIMIT}
+            正式 {placed} / {Math.max(slots, OFFICIAL_LIMIT)} 人
+            {overflow > 0 ? ` · 还有 ${overflow} 人没排上` : ""}
           </span>
           {ghost.length > 0 && (
             <span className="badge text-[#8a4b09]">
@@ -709,15 +705,6 @@ export default function GuanduClient() {
                                 ))}
                               </optgroup>
                             )}
-                            {bench.length > 0 && (
-                              <optgroup label="替补">
-                                {bench.map((name) => (
-                                  <option key={name} value={name}>
-                                    {name}
-                                  </option>
-                                ))}
-                              </optgroup>
-                            )}
                             {unarranged.length > 0 && (
                               <optgroup label="名单里未安排">
                                 {unarranged.map((name) => (
@@ -759,72 +746,35 @@ export default function GuanduClient() {
           </div>
         )}
 
-        {plan && (
+        {plan && (unarranged.length > 0 || removed.length > 0) && (
           <div className="card mt-4 p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-[14px] font-semibold">替补队</h3>
-              <span className="badge">
-                {bench.length} / {SUBSTITUTE_LIMIT}
-              </span>
-              <span className="text-[11.5px] text-[var(--muted)]">
-                名单里没进正式的按实力取前 10，也可以手动加
-              </span>
-            </div>
-            <div className="mt-2.5 flex flex-wrap gap-1.5">
-              {bench.length === 0 && (
-                <span className="text-[12px] text-[var(--muted)]">还没有替补</span>
-              )}
-              {bench.map((name) => (
-                <span key={name} className="badge gap-1 pr-1">
-                  {name}
-                  <button
-                    type="button"
-                    className="grid h-4 w-4 place-items-center rounded-full text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]"
-                    onClick={() => updatePlan((current) => removeSubstitute(current, name))}
-                    aria-label={`从替补里移除 ${name}`}
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
-              ))}
-            </div>
-
             {unarranged.length > 0 && (
-              <div className="mt-3 border-t border-[var(--line)] pt-2.5">
+              <div>
                 <span className="text-[11.5px] text-[var(--muted)]">
-                  名单里还没安排（{unarranged.length}）：
+                  名单里还没排上的（{unarranged.length}
+                  {overflow > 0 ? `，其中 ${overflow} 个是超过 30 人名额的` : ""}
+                  ）：想安排就从上面对应的下拉里直接选他
                 </span>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   {unarranged.map((name) => (
-                    <button
-                      key={name}
-                      type="button"
-                      className="badge hover:border-[var(--line-strong)] hover:bg-[var(--surface-2)]"
-                      onClick={() => updatePlan((current) => addSubstitute(current, name))}
-                      title="加进替补队"
-                    >
-                      + {name}
-                    </button>
+                    <span key={name} className="badge">
+                      {name}
+                    </span>
                   ))}
                 </div>
               </div>
             )}
 
             {removed.length > 0 && (
-              <div className="mt-3 border-t border-[var(--line)] pt-2.5">
+              <div className={unarranged.length > 0 ? "mt-3 border-t border-[var(--line)] pt-2.5" : ""}>
                 <span className="text-[11.5px] text-[var(--muted)]">
-                  被剔除的名字（确实要安排就点一下加进替补）：
+                  被剔除的名字（不在名单里，不会进方案）：
                 </span>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   {removed.map((name) => (
-                    <button
-                      key={name}
-                      type="button"
-                      className="badge hover:border-[var(--line-strong)] hover:bg-[var(--surface-2)]"
-                      onClick={() => updatePlan((current) => addSubstitute(current, name))}
-                    >
-                      + {name}
-                    </button>
+                    <span key={name} className="badge line-through decoration-[var(--muted)]">
+                      {name}
+                    </span>
                   ))}
                 </div>
               </div>

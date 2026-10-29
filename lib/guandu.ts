@@ -2,10 +2,8 @@
  * 官渡之战安排：纯逻辑（不含 DOM / Canvas）
  * ---------------------------------------------------------------------------
  * 规则（已与用户确认）：
- *   · 正式 30 人、预备 10 人；只安排正式。名单超过 30 人时取实力前 30，其余进替补
- *   · 实力前五命名为队长：最强队长 → 兵器坊，第二 → 工匠坊，其余三个依次带三 / 四 / 五队
- *   · 一 / 二 / 三队（强组，各 5 人）吃第 6 名以后的人，三队蛇形均衡
- *   · 四队、五队（我方上 / 中 / 下路小粮仓，6 人）、机动队吃剩下的人，再蛇形均衡
+ *   · 只安排 30 个正式人员；名单超过 30 人时取实力前 30，多的人不排（页面只提示数量）
+ *   · 实力前五命名为队长：第 1 → 一队（兵器坊），第 2 → 三队（工匠坊），第 3 → 二队，第 4 → 四队，第 5 → 机动队
  *   · 点两个位置互换、每个位置下拉选人，都在 UI 层调用这里的纯函数
  */
 
@@ -47,7 +45,6 @@ export type GuanduTeam = {
 export type GuanduPlan = {
   title: string;
   teams: GuanduTeam[];
-  substitutes: string[];
   /** 右侧备注（长规则） */
   remark: string;
   /** 底部注意事项 */
@@ -58,7 +55,6 @@ export type GuanduPlan = {
 export type SlotPos = { team: number; row: number };
 
 export const OFFICIAL_LIMIT = 30;
-export const SUBSTITUTE_LIMIT = 10;
 /** 实力前几名叫队长 */
 export const LEADER_COUNT = 5;
 
@@ -306,8 +302,7 @@ function fillRows(labels: string[], names: string[]): GuanduRow[] {
 
 /**
  * 按名单生成初始方案（默认样式照用户的官渡作战表）。
- * official：已确认参赛的正式成员（顺序无所谓，这里会按实力重排）；
- * substitutes：没进正式的预备成员（最多 10 个）。
+ * official：已确认参赛的成员（顺序无所谓，这里会按实力重排，只取前 30）。
  *
  * 队长（前五名）：第 1 → 一队，第 2 → 三队，第 3 → 二队，第 4 → 四队，第 5 → 机动队。
  * 强组 = 一 / 二 / 三 / 四队（各 5 人：队长车头 + 队员1-4），剩下的高实力者在这四队之间蛇形；
@@ -315,7 +310,6 @@ function fillRows(labels: string[], names: string[]): GuanduRow[] {
  */
 export function buildPlan(
   official: GuanduMember[],
-  substitutes: string[] = [],
   base?: Partial<Pick<GuanduPlan, "title" | "remark" | "notes">>,
 ): GuanduPlan {
   const sorted = sortMembers(official).slice(0, OFFICIAL_LIMIT);
@@ -411,7 +405,6 @@ export function buildPlan(
   return {
     title: base?.title ?? DEFAULT_TITLE,
     teams,
-    substitutes: substitutes.filter(Boolean).slice(0, SUBSTITUTE_LIMIT),
     remark: base?.remark ?? DEFAULT_REMARK,
     notes: base?.notes ?? DEFAULT_NOTES,
     updatedAt: new Date().toISOString(),
@@ -429,7 +422,6 @@ export function clonePlan(plan: GuanduPlan): GuanduPlan {
       tasks: [...team.tasks] as [string, string, string],
       rows: team.rows.map((row) => ({ ...row })),
     })),
-    substitutes: [...plan.substitutes],
   };
 }
 
@@ -457,8 +449,7 @@ export function swapSlots(plan: GuanduPlan, a: SlotPos, b: SlotPos): GuanduPlan 
 /**
  * 把人放到某个位置：
  * · 他已经在别的队里 → 两边互换
- * · 他原来在替补里 → 被换下来的人进替补（保持替补人数）
- * · 其它情况（名单里还没安排的人）→ 直接占位，原本的人回到未安排
+ * · 其它情况（名单里还没安排的人）→ 直接占位，原本的人变成未安排
  */
 export function assignToSlot(plan: GuanduPlan, pos: SlotPos, name: string): GuanduPlan {
   const next = clonePlan(plan);
@@ -480,11 +471,6 @@ export function assignToSlot(plan: GuanduPlan, pos: SlotPos, name: string): Guan
   }
 
   slot.name = target;
-  const subIndex = next.substitutes.indexOf(target);
-  if (subIndex >= 0) {
-    if (previous) next.substitutes[subIndex] = previous;
-    else next.substitutes.splice(subIndex, 1);
-  }
   return touch(next);
 }
 
@@ -525,23 +511,6 @@ export function setTeamName(plan: GuanduPlan, teamIndex: number, value: string):
   return touch(next);
 }
 
-export function addSubstitute(plan: GuanduPlan, name: string): GuanduPlan {
-  const target = name.trim();
-  if (!target) return plan;
-  if (plan.substitutes.includes(target)) return plan;
-  if (locateName(plan, target)) return plan;
-  if (plan.substitutes.length >= SUBSTITUTE_LIMIT) return plan;
-  const next = clonePlan(plan);
-  next.substitutes.push(target);
-  return touch(next);
-}
-
-export function removeSubstitute(plan: GuanduPlan, name: string): GuanduPlan {
-  const next = clonePlan(plan);
-  next.substitutes = next.substitutes.filter((item) => item !== name);
-  return touch(next);
-}
-
 export function setPlanText(
   plan: GuanduPlan,
   patch: Partial<Pick<GuanduPlan, "title" | "remark" | "notes">>,
@@ -577,9 +546,8 @@ export function slotCount(plan: GuanduPlan): number {
   return plan.teams.reduce((total, team) => total + team.rows.length, 0);
 }
 
-/** 名单里既没进正式、也没进替补的人 */
+/** 名单里还没安排进任何一个位置的人 */
 export function unarrangedNames(plan: GuanduPlan, rosterNames: string[]): string[] {
   const placed = new Set(plannedNames(plan));
-  const bench = new Set(plan.substitutes);
-  return rosterNames.filter((name) => !placed.has(name) && !bench.has(name));
+  return rosterNames.filter((name) => !placed.has(name));
 }

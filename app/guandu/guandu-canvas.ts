@@ -54,7 +54,7 @@ type Cell = {
 };
 
 export function drawGuandu(canvas: HTMLCanvasElement, plan: GuanduPlan): { width: number; height: number } {
-  /** 只画正式队（替补只在页面里参与换人，不出现在成图上） */
+  /** 只画 30 个正式位置（没有替补这一块） */
   const teamRows = plan.teams.reduce((total, team) => total + team.rows.length, 0);
   const bodyRows = teamRows;
 
@@ -332,7 +332,7 @@ export function drawGuandu(canvas: HTMLCanvasElement, plan: GuanduPlan): { width
   ctx.font = `10.5px ${FONT}`;
   ctx.textAlign = "right";
   ctx.fillText(
-    `正式 ${placed} 人 · 预备 ${plan.substitutes.length} 人 · 21:05 / 21:15 / 21:25`,
+    `正式 ${placed} 人 · 21:05 / 21:15 / 21:25`,
     x0 + tableW - 12,
     y0 + TITLE_H / 2,
   );
