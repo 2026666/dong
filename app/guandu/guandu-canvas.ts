@@ -1,4 +1,5 @@
 import type { GuanduPlan } from "@/lib/guandu";
+import { SUBSTITUTE_ROWS } from "@/lib/guandu";
 
 /**
  * 官渡作战表出图：把方案画成一张和示例表格一样的 PNG
@@ -33,6 +34,7 @@ const WEAK_CELL = "#f8f3e9";
 const MOBILE_CELL = "#f3f3f1";
 const GROUP_BG = "#f8f3e9";
 const NAME_COL_BG = "#fffdf9";
+const SUB_CELL = "#f7f3ea";
 
 type Cell = {
   /** 列区间 / 行区间，含端点 */
@@ -54,9 +56,10 @@ type Cell = {
 };
 
 export function drawGuandu(canvas: HTMLCanvasElement, plan: GuanduPlan): { width: number; height: number } {
-  /** 只画 30 个正式位置（没有替补这一块） */
+  /** 正式 30 个位置 + 固定 5 行替补（没替补也留白） */
   const teamRows = plan.teams.reduce((total, team) => total + team.rows.length, 0);
-  const bodyRows = teamRows;
+  const subs = plan.substitutes ?? [];
+  const bodyRows = teamRows + SUBSTITUTE_ROWS;
 
   const x0 = PAD;
   const y0 = PAD;
@@ -252,7 +255,49 @@ export function drawGuandu(canvas: HTMLCanvasElement, plan: GuanduPlan): { width
     });
   });
 
-  // 备注：整张表从表头下一行到底部（含注意事项那一块的高度）
+  /* ------------------------------ 替补队（固定 5 行，一行两个名字） ------------------------------ */
+  const subStart = teamRows;
+  const subEnd = subStart + SUBSTITUTE_ROWS - 1;
+  cells.push({
+    c0: 0,
+    c1: 0,
+    r0: subStart,
+    r1: subEnd,
+    text: "替补队",
+    font: 13,
+    weight: 600,
+    color: INK,
+    bg: SUB_CELL,
+  });
+  // 成员号 / 三波时间 / 成员数：合并留白
+  [1, 3, 4, 5, 6].forEach((c) => {
+    cells.push({
+      c0: c,
+      c1: c,
+      r0: subStart,
+      r1: subEnd,
+      text: "",
+      font: 10.5,
+      bg: SUB_CELL,
+    });
+  });
+  // 玩家ID：一行两个名字
+  for (let i = 0; i < SUBSTITUTE_ROWS; i += 1) {
+    const pair = subs.slice(i * 2, i * 2 + 2);
+    cells.push({
+      c0: 2,
+      c1: 2,
+      r0: subStart + i,
+      r1: subStart + i,
+      text: pair.join("　　"),
+      font: 12.5,
+      weight: 500,
+      color: pair.length ? INK : "#c4beb4",
+      bg: NAME_COL_BG,
+    });
+  }
+
+  // 备注：整张表从表头下一行到底部（含替补区与注意事项那一块的高度）
   cells.push({
     c0: 7,
     c1: 7,
@@ -332,7 +377,7 @@ export function drawGuandu(canvas: HTMLCanvasElement, plan: GuanduPlan): { width
   ctx.font = `10.5px ${FONT}`;
   ctx.textAlign = "right";
   ctx.fillText(
-    `正式 ${placed} 人 · 21:05 / 21:15 / 21:25`,
+    `正式 ${placed} 人 · 预备 ${subs.length} 人 · 21:05 / 21:15 / 21:25`,
     x0 + tableW - 12,
     y0 + TITLE_H / 2,
   );

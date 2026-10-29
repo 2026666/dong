@@ -20,14 +20,17 @@ import { parseOcrText } from "@/lib/ocr-parser";
 import { preprocessImage } from "@/lib/image-preprocess";
 import {
   OFFICIAL_LIMIT,
+  SUBSTITUTE_LIMIT,
   assignToSlot,
   buildPlan,
+  normalizeSubstitutes,
   parseGuanduRows,
   parseGuanduRoster,
   plannedCount,
   plannedNames,
   setPlanText,
   setGroupStartTask,
+  setSubstitutes,
   setTeamTask,
   slotCount,
   sortMembers,
@@ -48,6 +51,8 @@ export default function GuanduClient() {
   const [rosterText, setRosterText] = useLocalStorage<string>("guanduRosterText", "");
   const [plan, setPlan] = useLocalStorage<GuanduPlan | null>("guanduPlan", null);
   const [present, setPresent] = useLocalStorage<string[]>("guanduPresent", []);
+  /** 替补（单独一张「替补成员」截图识别出来的，最多 10 人，不传就空着） */
+  const [subs, setSubs] = useLocalStorage<string[]>("guanduSubs", []);
 
   const [rosterNotice, setRosterNotice] = useState<string | null>(null);
   const [removed, setRemoved] = useState<string[]>([]);
@@ -114,12 +119,17 @@ export default function GuanduClient() {
 
   /** 按当前名单 + 参赛名单重新生成一版方案（保留标题/备注这些手改过的文字） */
   const regenerate = useCallback(
-    (rosterMembers: GuanduMember[], presentNames: string[], previous: GuanduPlan | null) => {
+    (
+      rosterMembers: GuanduMember[],
+      presentNames: string[],
+      previous: GuanduPlan | null,
+      substituteNames?: string[],
+    ) => {
       const sorted = sortMembers(rosterMembers);
       const official = presentNames.length
         ? sorted.filter((m) => presentNames.includes(m.name))
         : sorted.slice(0, OFFICIAL_LIMIT);
-      return buildPlan(official, previous ?? undefined);
+      return buildPlan(official, substituteNames ?? previous?.substitutes ?? [], previous ?? undefined);
     },
     [],
   );
@@ -303,6 +313,89 @@ export default function GuanduClient() {
       }
     },
     [expected, roster.members, rosterNameSet, regenerate, setExpected, setPlan, setPresent],
+  );
+
+  /**
+   * 识别「替补成员」页签的截图：最多 10 人，只画在图上、不参与换人。
+   * 已经在前 30 正式名单里的名字会被剔掉；认不全就换参数再补一轮。
+   */
+  const handleSubImages = useCallback(
+    async (files: File[]) => {
+      if (!files.length) return;
+      if (!roster.members.length) {
+        setOcrMessage("先上传盟员名单：OCR 要用它来核对名字。");
+        return;
+      }
+
+      setOcrBusy(true);
+      setOcrMessage("正在识别替补名单（首次加载模型较慢）…");
+      const knownNames = roster.members.map((m) => m.name);
+      const matched = new Set<string>();
+      const ignored: string[] = [];
+      let detected: number | null = null;
+
+      const collect = (text: string) => {
+        const hit = text.match(/替补成员\s*[（(]?\s*(\d+)\s*\/\s*(\d+)/);
+        if (hit) {
+          const value = Number(hit[1]);
+          if (Number.isFinite(value) && value > 0) detected = value;
+        }
+        for (const participant of parseOcrText(text, { knownNames })) {
+          const name = participant.playerName.trim();
+          if (!name) continue;
+          if (!rosterNameSet.has(name)) {
+            if (name.length >= 2 && /[\u4e00-\u9fa5]/.test(name) && !ignored.includes(name)) {
+              ignored.push(name);
+            }
+            continue;
+          }
+          if (present.includes(name)) continue;
+          matched.add(name);
+        }
+      };
+
+      try {
+        for (let i = 0; i < files.length; i += 1) {
+          setOcrMessage(
+            files.length > 1 ? `正在识别替补第 ${i + 1} / ${files.length} 张…` : "正在识别替补截图…",
+          );
+          collect(await recognizeImage(files[i]));
+        }
+
+        const goal = Math.min(detected ?? SUBSTITUTE_LIMIT, SUBSTITUTE_LIMIT);
+        for (let round = 2; round <= 3 && matched.size < goal; round += 1) {
+          setOcrMessage(`替补认出 ${matched.size} 人，换参数再识别一次（第 ${round} 轮）…`);
+          const options =
+            round === 2
+              ? { scale: 2.5, contrast: 1.9, binarize: false }
+              : { scale: 3, contrast: 2.2, threshold: 0, binarize: true };
+          for (let i = 0; i < files.length; i += 1) {
+            const blob = await preprocessImage(files[i], options);
+            collect(await recognizeImage(blob));
+          }
+        }
+
+        const ordered = knownNames.filter((name) => matched.has(name));
+        const next = normalizeSubstitutes(ordered, present);
+        setSubs(next);
+        setPlan((current) => (current ? setSubstitutes(current, next) : current));
+        setStale(true);
+        setOcrBusy(false);
+        setOcrMessage(
+          next.length
+            ? `替补认出 ${next.length} 人${
+                ordered.length > SUBSTITUTE_LIMIT ? `（超过 ${SUBSTITUTE_LIMIT} 人的只保留前 ${SUBSTITUTE_LIMIT} 个）` : ""
+              }${ignored.length ? `，另有 ${ignored.length} 个名字不在盟员名单里已忽略` : ""}`
+            : "替补一个都没对上：确认这张是「替补成员」页签，且名单表格是最新的（也可以先不填替补）。",
+        );
+      } catch (error) {
+        setOcrMessage(
+          `替补识别失败：${error instanceof Error ? error.message : "未知错误"}，可以换张截图再试。`,
+        );
+        setOcrBusy(false);
+      }
+    },
+    [present, roster.members, rosterNameSet, setPlan, setSubs],
   );
 
   /** 从候选 / 名单里补一个人进参赛名单（补到预期人数就停） */
@@ -744,6 +837,80 @@ export default function GuanduClient() {
             </p>
           </div>
         )}
+
+        {/* 替补：单独一张截图，最多 10 人，只画在图上、不参与换人 */}
+        <div className="mt-4 rounded-xl border border-[var(--line)] px-3 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[12.5px] font-medium">替补名单（可选，最多 {SUBSTITUTE_LIMIT} 人）</span>
+            <span className="text-[11.5px] text-[var(--muted)]">
+              传「替补成员」页签那张截图；不传就空着，图上替补队留白
+            </span>
+            {subs.length > 0 && (
+              <button
+                type="button"
+                className="ml-auto text-[11.5px] text-[var(--muted)] underline underline-offset-2 hover:text-[var(--ink)]"
+                onClick={() => {
+                  setSubs([]);
+                  setPlan((current) =>
+                    current ? setSubstitutes(current, []) : current,
+                  );
+                  setStale(true);
+                }}
+              >
+                清空替补
+              </button>
+            )}
+          </div>
+
+          <label
+            className={cn(
+              "mt-2 flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--line-strong)] px-3 py-2.5 text-center transition-colors",
+              ocrBusy ? "cursor-not-allowed opacity-60" : "hover:bg-[var(--surface-2)]",
+            )}
+          >
+            <ImagePlus className="h-4 w-4 text-[var(--muted)]" />
+            <span className="text-[12px]">选择「替补成员」截图</span>
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              disabled={ocrBusy}
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? []);
+                event.target.value = "";
+                void handleSubImages(files);
+              }}
+            />
+          </label>
+
+          {subs.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {subs.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  className="badge hover:border-[var(--line-strong)]"
+                  title="点一下从替补里移除"
+                  onClick={() => {
+                    const next = subs.filter((item) => item !== name);
+                    setSubs(next);
+                    setPlan((current) =>
+                      current ? setSubstitutes(current, next) : current,
+                    );
+                    setStale(true);
+                  }}
+                >
+                  {name} ×
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-2 text-[11.5px] text-[var(--muted)]">
+              还没有替补：图上「替补队」会留 5 行空白，不会自动拿名单里的人凑。
+            </p>
+          )}
+        </div>
       </section>
 
       {/* ---------------- 3. 方案 ---------------- */}
@@ -914,6 +1081,33 @@ export default function GuanduClient() {
             <p className="mx-auto mt-1 max-w-md text-[12.5px] leading-relaxed text-[var(--muted)]">
               先把名单贴进来，再点右上角「按实力重排」，就能得到一版 30 人的安排。
             </p>
+          </div>
+        )}
+
+        {plan && (
+          <div className="card mt-4 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-[14px] font-semibold">替补队</h3>
+              <span className="badge">
+                {plan.substitutes.length} / {SUBSTITUTE_LIMIT}
+              </span>
+              <span className="text-[11.5px] text-[var(--muted)]">
+                只出现在图上（一行两个名字），不参与换人；没传就留白
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1">
+              {plan.substitutes.length === 0 ? (
+                <span className="text-[12px] text-[var(--muted)]">
+                  还没有替补：图上替补队会留 5 行空白
+                </span>
+              ) : (
+                plan.substitutes.map((name) => (
+                  <span key={name} className="badge">
+                    {name}
+                  </span>
+                ))
+              )}
+            </div>
           </div>
         )}
 

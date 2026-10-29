@@ -45,6 +45,8 @@ export type GuanduTeam = {
 export type GuanduPlan = {
   title: string;
   teams: GuanduTeam[];
+  /** 替补（图上「替补队」一行两个名字，最多 10 人；不传就空着） */
+  substitutes: string[];
   /** 右侧备注（长规则） */
   remark: string;
   /** 底部注意事项 */
@@ -55,6 +57,10 @@ export type GuanduPlan = {
 export type SlotPos = { team: number; row: number };
 
 export const OFFICIAL_LIMIT = 30;
+/** 替补最多 10 人 */
+export const SUBSTITUTE_LIMIT = 10;
+/** 图上替补队固定画 5 行（一行两个名字） */
+export const SUBSTITUTE_ROWS = 5;
 /** 实力前几名叫队长 */
 export const LEADER_COUNT = 5;
 
@@ -300,6 +306,21 @@ function fillRows(labels: string[], names: string[]): GuanduRow[] {
   });
 }
 
+/** 替补清洗：去空、去重、剔除已在正式 30 人里的、最多留 10 个（顺序保持传入顺序） */
+export function normalizeSubstitutes(names: string[], officialNames: string[]): string[] {
+  const official = new Set(officialNames);
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of names) {
+    const name = (raw ?? "").trim();
+    if (!name || official.has(name) || seen.has(name)) continue;
+    seen.add(name);
+    result.push(name);
+    if (result.length >= SUBSTITUTE_LIMIT) break;
+  }
+  return result;
+}
+
 /**
  * 按名单生成初始方案（默认样式照用户的官渡作战表）。
  * official：已确认参赛的成员（顺序无所谓，这里会按实力重排，只取前 30）。
@@ -307,14 +328,20 @@ function fillRows(labels: string[], names: string[]): GuanduRow[] {
  * 队长（前五名）：第 1 → 一队，第 2 → 三队，第 3 → 二队，第 4 → 四队，第 5 → 机动队。
  * 强组 = 一 / 二 / 三 / 四队（各 5 人：队长车头 + 队员1-4），剩下的高实力者在这四队之间蛇形；
  * 弱组 = 五队（三路小粮仓各 2 人）+ 机动队（队员2/3/4），剩下的人在这两处蛇形。
+ * 替补：只画在图上「替补队」一块，不参与换人；没传就空着。
  */
 export function buildPlan(
   official: GuanduMember[],
-  base?: Partial<Pick<GuanduPlan, "title" | "remark" | "notes">>,
+  substitutes: string[] = [],
+  base?: Partial<Pick<GuanduPlan, "title" | "remark" | "notes" | "substitutes">>,
 ): GuanduPlan {
   const sorted = sortMembers(official).slice(0, OFFICIAL_LIMIT);
   const leaders = sorted.slice(0, LEADER_COUNT).map((m) => m.name);
   const rest = sorted.slice(LEADER_COUNT).map((m) => m.name);
+  const subs = normalizeSubstitutes(
+    base?.substitutes ?? substitutes,
+    sorted.map((m) => m.name),
+  );
 
   // 强组：一 / 二 / 三 / 四队，各 4 个队员（蛇形均衡）
   const strong = snakeDeal(rest.slice(0, 16), [4, 4, 4, 4]);
@@ -405,6 +432,7 @@ export function buildPlan(
   return {
     title: base?.title ?? DEFAULT_TITLE,
     teams,
+    substitutes: subs,
     remark: base?.remark ?? DEFAULT_REMARK,
     notes: base?.notes ?? DEFAULT_NOTES,
     updatedAt: new Date().toISOString(),
@@ -417,12 +445,21 @@ export function buildPlan(
 export function clonePlan(plan: GuanduPlan): GuanduPlan {
   return {
     ...plan,
+    substitutes: [...(plan.substitutes ?? [])],
     teams: plan.teams.map((team) => ({
       ...team,
       tasks: [...team.tasks] as [string, string, string],
       rows: team.rows.map((row) => ({ ...row })),
     })),
   };
+}
+
+/** 直接设置替补名单（会做清洗与封顶 10 人） */
+export function setSubstitutes(plan: GuanduPlan, names: string[]): GuanduPlan {
+  const next = clonePlan(plan);
+  next.substitutes = normalizeSubstitutes(names, plannedNames(plan));
+  next.updatedAt = new Date().toISOString();
+  return next;
 }
 
 export function locateName(plan: GuanduPlan, name: string): SlotPos | null {
