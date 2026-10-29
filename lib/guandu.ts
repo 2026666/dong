@@ -28,6 +28,8 @@ export type GuanduRow = {
   group?: string;
   /** 队长 / 车头位，出图时高亮 */
   lead?: boolean;
+  /** 这一行自己的 21:05 任务（五队三组各不相同），有就覆盖队级任务 */
+  startTask?: string;
 };
 
 export type GuanduTeam = {
@@ -63,25 +65,25 @@ export const LEADER_COUNT = 5;
 export const DEFAULT_TITLE = "官渡作战表";
 
 export const DEFAULT_REMARK = [
-  "1、准备时间：青囊术 8 分 / 次，每次 20 万兵，免费高迁 5 分钟一次；车头注意看情况吃药。",
-  "2、建筑物没有驻防时不需要集结；有敌方驻防时车头开集结，大家上车。单兵卡车头时间如同攻城战：都上自己所在区域车头的车，别上其他区。21:05 之前必须进地图，替补也要提前进来，21:06 主力还没进的话替补即可登场。",
-  "3、记住几个重要时间点：21:15 乌巢开放，21:25 霹雳车 / 官渡 / 大粮仓开放，辎重车 21:12、21:18、21:25 各一波。",
-  "4、安排好的成员可以满编进驻守，其他地方蹭分的成员派少量兵即可。",
-  "5、分数等级奖：个人 50W 分（满分）、20W 分（低保）。乌巢、官渡、兵器坊、大粮仓、霹雳车是全战重点目标；小粮仓与工匠坊兵力不够时可以适时放弃，确保战略目标在手。辎重车回来以后才有加分，记得快结束时收兵。",
-  "6、稳赢的局尽量让所有人拿满 50W 分；同盟到 150W 分会提前结束（只与占领建筑数量有关，和单人拿多少无关）。分数达标者可用高迁把所有兵召回，去支援其它地方。",
-  "7、官渡拿不下来时，尽可能多地去挖辎重车（把地图缩小的地上的胶囊）：蓝色代表我方占领，红色代表敌方占领。",
-  "8、本表仅作参照：初始人员分布尽量按此表进行，后续实战灵活安排，例如小粮仓可以留人、其他人支援工匠坊 / 兵器坊。",
+  "1、准备时间：青囊术8分/次，每次20万兵，免费高迁5分钟一次，车头注意看情况吃药；",
+  "2、建筑物没有驻防时不需要集结，有敌方驻防时车头开集结，大家上车，单兵卡车头时间如同攻城战：都上自己所在区域车头的车，别上其他区。21点5分之前必须要进地图，替补也需要提前进来，21点6分主力还没进的话，替补即可登场；",
+  "3、记住几个重要的时间点，21点15分鸟巢开放，21点25分霹雳车、官渡、大粮仓开放，辎重车21点12分、21点18分、21点25分；",
+  "4、安排成员可以满编进驻守，其他地方蹭分成员派少量兵即可；",
+  "5、分数等级奖：个人50W分（满分），20W分（低保），鸟巢、官渡、兵器坊、大粮仓、霹雳车是全战重点目标，小粮仓与工匠坊兵力不够的情况下，可以适时放弃，确保战略目标在手，辎重车回来以后才会有加分，要记得快点结束的时候收兵；",
+  "6、若稳赢的局面尽量让所有人拿满50W分，同盟达到150W分则会提前结束（这里跟个人拿分多少无关，只与占领建筑数量有关）。分数达标者可用高迁把所有兵召回，去支援其他地方；",
+  "7、若官渡拿不下来，则尽可能多地去挖辎重车（把地图缩小的地上的胶囊）；蓝色代表我方占领，红色代表敌方占领。",
+  "8、（安排表仅作参照，初始人员分布尽量按照此表进行，后续实战灵活安排，例如小粮仓可以留人其他人支援工匠坊兵器坊）",
 ].join("\n");
 
 export const DEFAULT_NOTES = [
-  "① 兵配比 6.1.3 或 5.2.3；",
-  "② 尽量多派几队兵驻防建筑，打人分加的不多；",
-  "③ 所有任务如有变动，具体听从现场指挥；",
-  "④ 队长在战场上都可以机动，随机应变；",
-  "⑤ 官渡打不下来，就去找人少的任何建筑占领；",
-  "⑥ 占领建筑后，其他人去大粮仓或辎重车；",
-  "⑦ 替补进来的优先抢我方没人、或者人少的小粮仓；",
-  "⑧ 自己驻防的位置没有对方人员，就高迁到需要的地方去驻防。",
+  "①兵配比6.1.3或5.2.3；",
+  "②尽量多派几队兵驻防建筑，打人分加的不多；",
+  "③所有任务如有变动具体听从现场指挥；",
+  "④队长在战场上都可以机动，随机应变；",
+  "⑤官渡打不下来，就去找人少的任何建筑占领；",
+  "⑥占领建筑后，其他人去大粮仓或游走驻防；",
+  "⑦所有替补进来的优先抢我方没人或者人少的小粮仓；",
+  "⑧如果自己驻防的位置没有对方人员，那么高迁至需要的地方进行驻防。",
 ].join("\n");
 
 /* ------------------------------ 名单解析 ------------------------------ */
@@ -278,22 +280,35 @@ export function snakeDeal(people: string[], caps: number[]): string[][] {
 
 /* ------------------------------ 生成方案 ------------------------------ */
 
-function leadRow(label: string, name: string, group?: string): GuanduRow {
-  return group ? { label, name, group, lead: true } : { label, name, lead: true };
-}
+/** 一~四队：队长车头 + 队员1-4；机动队：队长车头 + 队员2/3/4（照原表编号） */
+const TEAM_LABELS: Record<string, string[]> = {
+  t1: ["队长车头", "队员1", "队员2", "队员3", "队员4"],
+  t2: ["队长车头", "队员1", "队员2", "队员3", "队员4"],
+  t3: ["队长车头", "队员1", "队员2", "队员3", "队员4"],
+  t4: ["队长车头", "队员1", "队员2", "队员3", "队员4"],
+  t6: ["队长车头", "队员2", "队员3", "队员4"],
+};
 
-function memberRows(names: string[], count: number, group?: string): GuanduRow[] {
-  return Array.from({ length: count }, (_, i) => {
-    const row: GuanduRow = { label: `队员${i + 1}`, name: names[i] ?? "" };
-    if (group) row.group = group;
+/** 五队：我方上 / 中 / 下路小粮仓，每组两人，成员号列合并显示组名 */
+const WU_DUI_GROUPS = [
+  { group: "我方上路小粮仓", start: "开局飞我方上路小粮仓（阳武\\封丘）" },
+  { group: "我方中路小粮仓", start: "开局飞我方中路小粮仓（延津\\白马）" },
+  { group: "我方下路小粮仓", start: "开局飞我方下路小粮仓（原武\\燕县）" },
+];
+
+function fillRows(labels: string[], names: string[]): GuanduRow[] {
+  return labels.map((label, i) => {
+    const row: GuanduRow = { label, name: names[i] ?? "" };
+    if (i === 0) row.lead = true;
     return row;
   });
 }
 
 /**
- * 按名单生成初始方案。
+ * 按名单生成初始方案（默认样式照用户的官渡作战表）。
  * official：已确认参赛的正式成员（顺序无所谓，这里会按实力重排）；
  * substitutes：没进正式的预备成员（最多 10 个）。
+ * 队长：实力前五，依次坐一 / 二 / 三 / 四 / 机动队的车头位；五队三组不设队长。
  */
 export function buildPlan(
   official: GuanduMember[],
@@ -304,12 +319,25 @@ export function buildPlan(
   const leaders = sorted.slice(0, LEADER_COUNT).map((m) => m.name);
   const rest = sorted.slice(LEADER_COUNT).map((m) => m.name);
 
-  // 强组：一 / 二 / 三队，各 4 个队员
+  // 强组：一 / 二 / 三队，各 4 个队员（蛇形均衡）
   const strong = snakeDeal(rest.slice(0, 12), [4, 4, 4]);
-  // 弱组：四队 4 人、五队 5 人、机动队 4 人（含机动队长）
-  const weak = snakeDeal(rest.slice(12), [4, 5, 4]);
+  // 弱组：四队 4 人、五队 6 人（三路小粮仓各 2 人）、机动队 3 人
+  const weak = snakeDeal(rest.slice(12), [4, 6, 3]);
 
-  const first = (list: string[], i: number) => list[i] ?? "";
+  const leader = (i: number) => leaders[i] ?? "";
+
+  // 五队：weak[1] 按 2 人一组落到三路小粮仓
+  const wuRows: GuanduRow[] = [];
+  WU_DUI_GROUPS.forEach((item, g) => {
+    for (let k = 0; k < 2; k += 1) {
+      wuRows.push({
+        label: k === 0 ? "车头" : "队员1",
+        name: weak[1][g * 2 + k] ?? "",
+        group: item.group,
+        startTask: item.start,
+      });
+    }
+  });
 
   const teams: GuanduTeam[] = [
     {
@@ -317,40 +345,40 @@ export function buildPlan(
       name: "一队",
       target: "兵器坊",
       tasks: ["开局飞兵器坊", "乌巢", "官渡"],
-      rows: [leadRow("队长车头", first(leaders, 0)), ...memberRows(strong[0], 4)],
+      rows: fillRows(TEAM_LABELS.t1, [leader(0), ...strong[0]]),
     },
     {
       id: "t2",
       name: "二队",
-      target: "工匠坊",
+      target: "兵器坊",
       tasks: [
-        "开局飞工匠坊（对方下路小粮仓）",
-        "队长不动，其他人支援乌巢",
+        "开局飞兵器坊",
+        "队长不动，其他人看情况支援乌巢",
         "抢左大粮仓（敖昌），没抢到接手兵器坊驻防",
       ],
-      rows: [leadRow("队长车头", first(leaders, 1)), ...memberRows(strong[1], 4)],
+      rows: fillRows(TEAM_LABELS.t2, [leader(1), ...strong[1]]),
     },
     {
       id: "t3",
       name: "三队",
-      target: "大粮仓",
+      target: "工匠坊",
       tasks: [
-        "开局飞大粮仓（对方上路小粮仓）",
+        "开局飞工匠坊（对方下路小粮仓）",
         "乌巢",
         "官渡（抢最后一波乌巢）",
       ],
-      rows: [leadRow("队长车头", first(leaders, 2)), ...memberRows(strong[2], 4)],
+      rows: fillRows(TEAM_LABELS.t3, [leader(2), ...strong[2]]),
     },
     {
       id: "t4",
       name: "四队",
-      target: "上路小粮仓",
+      target: "工匠坊",
       tasks: [
-        "飞我方上路小粮仓（阳武 / 封丘）",
-        "小粮仓没抢到就支援中路",
+        "开局飞工匠坊（对方上路小粮仓）",
+        "工匠坊守不住就去打对方中路小粮仓",
         "霹雳车",
       ],
-      rows: [leadRow("队长车头", first(leaders, 3)), ...memberRows(weak[0], 4)],
+      rows: fillRows(TEAM_LABELS.t4, [leader(3), ...weak[0]]),
     },
     {
       id: "t5",
@@ -358,29 +386,22 @@ export function buildPlan(
       target: "三路小粮仓",
       grouped: true,
       tasks: [
-        "飞我方上 / 中 / 下路小粮仓（阳武 / 延津 / 原武）",
-        "一路没抢到就机动支援其他建筑",
-        "1、2、3 协助抢左大粮仓，4、5、6 协助抢右大粮仓",
+        "",
+        "开局没抢到小粮仓就机动支援其他建筑",
+        "1、2、3 协助抢左大粮仓（敖昌）\n4、5、6 协助抢右大粮仓（黎阳）",
       ],
-      rows: [
-        leadRow("车头", first(leaders, 4), "上路小粮仓"),
-        ...memberRows([first(weak[1], 0)], 1, "上路小粮仓"),
-        leadRow("车头", first(weak[1], 1), "中路小粮仓"),
-        ...memberRows([first(weak[1], 2)], 1, "中路小粮仓"),
-        leadRow("车头", first(weak[1], 3), "下路小粮仓"),
-        ...memberRows([first(weak[1], 4)], 1, "下路小粮仓"),
-      ],
+      rows: wuRows,
     },
     {
       id: "t6",
       name: "机动队",
       target: "补位",
       tasks: [
-        "开局看情况帮工匠或兵器（没抢下来的）",
+        "开局看情况帮工匠或者兵器（没抢下来的）",
         "补位",
-        "官渡情况：官渡没抢到就接手工匠坊驻防",
+        "看官渡情况（官渡没抢到接手工匠坊驻防）官渡赢抢右大粮仓（黎阳）",
       ],
-      rows: [leadRow("机动队长", first(weak[2], 0)), ...memberRows(weak[2].slice(1), 3)],
+      rows: fillRows(TEAM_LABELS.t6, [leader(4), ...weak[2]]),
     },
   ];
 
@@ -393,6 +414,7 @@ export function buildPlan(
     updatedAt: new Date().toISOString(),
   };
 }
+
 
 /* ------------------------------ 编辑操作 ------------------------------ */
 
@@ -473,6 +495,22 @@ export function setTeamTask(
   const team = next.teams[teamIndex];
   if (!team) return plan;
   team.tasks[slot] = value;
+  return touch(next);
+}
+
+/** 改「某个小组」的 21:05 任务（五队三路小粮仓各写各的） */
+export function setGroupStartTask(
+  plan: GuanduPlan,
+  teamIndex: number,
+  group: string,
+  value: string,
+): GuanduPlan {
+  const next = clonePlan(plan);
+  const team = next.teams[teamIndex];
+  if (!team) return plan;
+  team.rows = team.rows.map((row) =>
+    row.group === group ? { ...row, startTask: value } : row,
+  );
   return touch(next);
 }
 

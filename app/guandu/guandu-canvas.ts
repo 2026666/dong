@@ -32,6 +32,7 @@ const STRONG_CELL = "#eef3fa";
 const WEAK_CELL = "#f8f3e9";
 const MOBILE_CELL = "#f3f3f1";
 const GROUP_BG = "#f8f3e9";
+const SUB_CELL = "#f7f3ea";
 const NAME_COL_BG = "#fffdf9";
 
 type Cell = {
@@ -54,12 +55,10 @@ type Cell = {
 };
 
 export function drawGuandu(canvas: HTMLCanvasElement, plan: GuanduPlan): { width: number; height: number } {
-  const flat: Array<{ label: string; name: string; group?: string; lead?: boolean }> = [];
-  plan.teams.forEach((team) => {
-    team.rows.forEach((row) => {
-      flat.push({ label: row.label, name: row.name, group: row.group, lead: row.lead });
-    });
-  });
+  /** 正式队每队一行，替补队两人一行（照原表：替补队不编号、不分列） */
+  const teamRows = plan.teams.reduce((total, team) => total + team.rows.length, 0);
+  const subRows = Math.ceil(plan.substitutes.length / 2);
+  const bodyRows = teamRows + subRows;
 
   const x0 = PAD;
   const y0 = PAD;
@@ -78,7 +77,7 @@ export function drawGuandu(canvas: HTMLCanvasElement, plan: GuanduPlan): { width
     ? Math.max(ROW_H * 2, Math.round(notesLines.length * notesFont * 1.36 + 22))
     : 0;
 
-  const H = PAD * 2 + TITLE_H + HEAD_H + flat.length * ROW_H + footH;
+  const H = PAD * 2 + TITLE_H + HEAD_H + bodyRows * ROW_H + footH;
   if (!ctx) return { width: W, height: H };
 
   canvas.width = W * SCALE;
@@ -122,7 +121,23 @@ export function drawGuandu(canvas: HTMLCanvasElement, plan: GuanduPlan): { width
     const count = team.rows.length;
     rowCursor += count;
 
-    // 队伍列：五队按三路小粮仓拆成三块，其它队整块合并
+    const tint =
+      teamIndex <= 2 ? STRONG_CELL : teamIndex <= 4 ? WEAK_CELL : MOBILE_CELL;
+
+    // 队伍列：整队一块（五队也是「五队」，组名放到成员号列）
+    cells.push({
+      c0: 0,
+      c1: 0,
+      r0: start,
+      r1: start + count - 1,
+      text: team.name,
+      font: 13,
+      weight: 600,
+      color: INK,
+      bg: tint,
+    });
+
+    // 成员号列：五队按三路小粮仓合并组名，其它队逐行写「队长车头 / 队员N」
     if (team.grouped) {
       let runStart = start;
       for (let i = 1; i <= count; i += 1) {
@@ -130,8 +145,8 @@ export function drawGuandu(canvas: HTMLCanvasElement, plan: GuanduPlan): { width
         const previous = team.rows[i - 1].group;
         if (i === count || current !== previous) {
           cells.push({
-            c0: 0,
-            c1: 0,
+            c0: 1,
+            c1: 1,
             r0: runStart,
             r1: start + i - 1,
             text: previous ?? "",
@@ -144,29 +159,67 @@ export function drawGuandu(canvas: HTMLCanvasElement, plan: GuanduPlan): { width
         }
       }
     } else {
-      const tint =
-        teamIndex <= 2 ? STRONG_CELL : teamIndex === 3 || teamIndex === 4 ? WEAK_CELL : MOBILE_CELL;
-      cells.push({
-        c0: 0,
-        c1: 0,
-        r0: start,
-        r1: start + count - 1,
-        text: team.name,
-        font: 13,
-        weight: 600,
-        color: INK,
-        bg: tint,
+      team.rows.forEach((row, i) => {
+        cells.push({
+          c0: 1,
+          c1: 1,
+          r0: start + i,
+          r1: start + i,
+          text: row.label,
+          font: 10.5,
+          color: row.lead ? HEAD_INK : MUTED,
+          bg: row.lead ? LEAD_BG : undefined,
+          weight: row.lead ? 600 : 400,
+        });
       });
     }
 
-    // 三波任务：整队一块
-    team.tasks.forEach((task, i) => {
+    // 21:05：五队三组各写各的，其余队整队一块
+    const hasStart = team.rows.some((row) => (row.startTask ?? "").trim());
+    if (hasStart) {
+      let runStart = start;
+      for (let i = 1; i <= count; i += 1) {
+        const current = i < count ? team.rows[i].startTask ?? team.tasks[0] : undefined;
+        const previous = team.rows[i - 1].startTask ?? team.tasks[0];
+        if (i === count || current !== previous) {
+          cells.push({
+            c0: 3,
+            c1: 3,
+            r0: runStart,
+            r1: start + i - 1,
+            text: previous,
+            font: 10.5,
+            color: INK2,
+            align: "left",
+            pad: 8,
+            top: true,
+          });
+          runStart = start + i;
+        }
+      }
+    } else {
+      cells.push({
+        c0: 3,
+        c1: 3,
+        r0: start,
+        r1: start + count - 1,
+        text: team.tasks[0],
+        font: 10.5,
+        color: INK2,
+        align: "left",
+        pad: 8,
+        top: true,
+      });
+    }
+
+    // 21.15 / 21.25：整队一块
+    [1, 2].forEach((i) => {
       cells.push({
         c0: 3 + i,
         c1: 3 + i,
         r0: start,
         r1: start + count - 1,
-        text: task,
+        text: team.tasks[i],
         font: 10.5,
         color: INK2,
         align: "left",
@@ -175,21 +228,9 @@ export function drawGuandu(canvas: HTMLCanvasElement, plan: GuanduPlan): { width
       });
     });
 
-    // 每行：成员号 / 玩家ID / 成员数
+    // 每行：玩家ID / 成员数
     team.rows.forEach((row, i) => {
       const r = start + i;
-      const bg = row.lead ? LEAD_BG : undefined;
-      cells.push({
-        c0: 1,
-        c1: 1,
-        r0: r,
-        r1: r,
-        text: row.label,
-        font: 10.5,
-        color: row.lead ? HEAD_INK : MUTED,
-        bg,
-        weight: row.lead ? 600 : 400,
-      });
       cells.push({
         c0: 2,
         c1: 2,
@@ -213,13 +254,60 @@ export function drawGuandu(canvas: HTMLCanvasElement, plan: GuanduPlan): { width
     });
   });
 
+  /* ------------------------------ 替补队 ------------------------------ */
+  if (subRows > 0) {
+    const start = rowCursor;
+    rowCursor += subRows;
+    cells.push({
+      c0: 0,
+      c1: 0,
+      r0: start,
+      r1: start + subRows - 1,
+      text: "替补队",
+      font: 13,
+      weight: 600,
+      color: INK,
+      bg: SUB_CELL,
+    });
+    cells.push({
+      c0: 1,
+      c1: 1,
+      r0: start,
+      r1: start + subRows - 1,
+      text: "",
+      font: 10.5,
+      bg: SUB_CELL,
+    });
+    for (let i = 0; i < subRows; i += 1) {
+      cells.push({
+        c0: 2,
+        c1: 2,
+        r0: start + i,
+        r1: start + i,
+        text: plan.substitutes.slice(i * 2, i * 2 + 2).join("　　"),
+        font: 12.5,
+        color: INK,
+        bg: NAME_COL_BG,
+      });
+    }
+    cells.push({
+      c0: 3,
+      c1: 6,
+      r0: start,
+      r1: start + subRows - 1,
+      text: "",
+      font: 10.5,
+      bg: "#fdfbf6",
+    });
+  }
+
   // 备注：整张表从表头下一行到底部（含注意事项那一块的高度）
   cells.push({
     c0: 7,
     c1: 7,
     r0: 0,
-    r1: flat.length - 1,
-    h: flat.length * ROW_H + footH,
+    r1: bodyRows - 1,
+    h: bodyRows * ROW_H + footH,
     text: plan.remark,
     font: 10.6,
     color: INK2,
@@ -230,7 +318,7 @@ export function drawGuandu(canvas: HTMLCanvasElement, plan: GuanduPlan): { width
 
   // 注意事项
   if (notesText) {
-    const footerRow = flat.length;
+    const footerRow = bodyRows;
     cells.push({
       c0: 0,
       c1: 1,

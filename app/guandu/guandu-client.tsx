@@ -18,6 +18,7 @@ import { cn } from "@/lib/cn";
 import { useLocalStorage } from "@/lib/use-local-storage";
 import { recognizeImage } from "@/lib/ocr-service";
 import { parseOcrText } from "@/lib/ocr-parser";
+import { preprocessImage } from "@/lib/image-preprocess";
 import {
   OFFICIAL_LIMIT,
   SUBSTITUTE_LIMIT,
@@ -30,6 +31,7 @@ import {
   plannedNames,
   removeSubstitute,
   setPlanText,
+  setGroupStartTask,
   setTeamTask,
   slotCount,
   sortMembers,
@@ -55,6 +57,11 @@ export default function GuanduClient() {
   const [removed, setRemoved] = useState<string[]>([]);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrMessage, setOcrMessage] = useState<string | null>(null);
+  /** 预期参战人数（页签「正式成员(26/30)」里的 26），OCR 读到就自动填，读不到可以手改 */
+  const [expected, setExpected] = useLocalStorage<string>("guanduExpected", "");
+  /** 补识别之后还差几个人、可能是谁 */
+  const [shortfall, setShortfall] = useState(0);
+  const [candidates, setCandidates] = useState<string[]>([]);
   const [picked, setPicked] = useState<SlotPos | null>(null);
   const [generated, setGenerated] = useState(false);
   const [stale, setStale] = useState(false);
@@ -171,6 +178,12 @@ export default function GuanduClient() {
 
   /* --------------------------- OCR 识别 --------------------------- */
 
+  /**
+   * 识别「参战名单」截图：
+   * 1. 先用原图识别一轮，顺便读页签里的「正式成员(28/30)」拿到预期人数；
+   * 2. 人数对不上就换预处理参数再补识别（最多 3 轮）；
+   * 3. 还差人的话，按名单实力列出最可能漏掉的候选人让用户勾选。
+   */
   const handleImages = useCallback(
     async (files: File[]) => {
       if (!files.length) return;
@@ -182,57 +195,114 @@ export default function GuanduClient() {
       setOcrBusy(true);
       setOcrMessage("正在加载 PaddleOCR 模型（首次较慢，约 20 秒）…");
       const knownNames = roster.members.map((m) => m.name);
-      const matched: string[] = [];
+      const matched = new Set<string>();
       const missing: string[] = [];
+      let detected: number | null = null;
+
+      const collect = (text: string) => {
+        const hit = text.match(/正式成员\s*[（(]?\s*(\d+)\s*\/\s*(\d+)/);
+        if (hit) {
+          const value = Number(hit[1]);
+          if (Number.isFinite(value) && value > 0) detected = value;
+        }
+        for (const participant of parseOcrText(text, { knownNames })) {
+          const name = participant.playerName.trim();
+          if (!name) continue;
+          if (rosterNameSet.has(name)) {
+            matched.add(name);
+          } else if (
+            name.length >= 2 &&
+            /[\u4e00-\u9fa5]/.test(name) &&
+            !OCR_NOISE.some((re) => re.test(name)) &&
+            !missing.includes(name)
+          ) {
+            missing.push(name);
+          }
+        }
+      };
 
       try {
         for (let i = 0; i < files.length; i += 1) {
           setOcrMessage(
             files.length > 1 ? `正在识别第 ${i + 1} / ${files.length} 张…` : "正在识别截图…",
           );
-          const text = await recognizeImage(files[i]);
-          const participants = parseOcrText(text, { knownNames });
-          for (const participant of participants) {
-            const name = participant.playerName.trim();
-            if (!name) continue;
-            if (rosterNameSet.has(name)) {
-              if (!matched.includes(name)) matched.push(name);
-            } else if (
-              name.length >= 2 &&
-              /[\u4e00-\u9fa5]/.test(name) &&
-              !OCR_NOISE.some((re) => re.test(name)) &&
-              !missing.includes(name)
-            ) {
-              missing.push(name);
-            }
+          collect(await recognizeImage(files[i]));
+        }
+
+        // 页签里的「正式成员(28/30)」就是预期人数；用户手填过就以手填为准
+        const manual = Number(expected);
+        const target = Number.isFinite(manual) && manual > 0 ? manual : detected ?? 0;
+        if (!(Number.isFinite(manual) && manual > 0) && detected) setExpected(String(detected));
+
+        // 人没齐就换参数补识别（最多 3 轮）
+        for (let round = 2; round <= 3 && target > matched.size; round += 1) {
+          setOcrMessage(
+            `第 1 轮认出 ${matched.size} / ${target} 人，换参数补识别（第 ${round} 轮）…`,
+          );
+          const options =
+            round === 2
+              ? { scale: 2.5, contrast: 1.9, binarize: false }
+              : { scale: 3, contrast: 2.2, threshold: 0, binarize: true };
+          for (let i = 0; i < files.length; i += 1) {
+            const blob = await preprocessImage(files[i], options);
+            collect(await recognizeImage(blob));
           }
+        }
+
+        // 按名单顺序排好，后面按实力分派时更稳定
+        const ordered = knownNames.filter((name) => matched.has(name));
+        setPresent(ordered);
+        setRemoved(missing);
+
+        const gap = target > ordered.length ? target - ordered.length : 0;
+        setShortfall(gap);
+        setCandidates(
+          gap > 0
+            ? sortMembers(roster.members)
+                .filter((m) => !ordered.includes(m.name))
+                .slice(0, Math.min(10, gap + 4))
+                .map((m) => m.name)
+            : [],
+        );
+
+        setOcrBusy(false);
+        setOcrMessage(
+          ordered.length
+            ? `认出名单里 ${ordered.length} / ${target || ordered.length} 人${
+                missing.length ? `，自动剔除 ${missing.length} 个不在名单里的名字` : ""
+              }${gap > 0 ? `，还差 ${gap} 人（看下面的候选人）` : ""}`
+            : "一个都没对上：确认这张是「参战名单」页，且名单表格是最新的。",
+        );
+
+        if (ordered.length) {
+          setPlan((prev) => regenerate(roster.members, ordered, prev));
+          setStale(true);
+          setPicked(null);
         }
       } catch (error) {
         setOcrMessage(
           `识别失败：${error instanceof Error ? error.message : "未知错误"}，可以换张截图再试。`,
         );
         setOcrBusy(false);
-        return;
-      }
-
-      // 按名单顺序排好，后面按实力分派时更稳定
-      const ordered = knownNames.filter((name) => matched.includes(name));
-      setPresent(ordered);
-      setRemoved(missing);
-      setOcrBusy(false);
-      setOcrMessage(
-        ordered.length
-          ? `认出名单里 ${ordered.length} 人${missing.length ? `，自动剔除 ${missing.length} 个不在名单里的名字` : ""}`
-          : "一个都没对上：确认这张是「参战名单」页，且名单表格是最新的。",
-      );
-
-      if (ordered.length) {
-        setPlan((prev) => regenerate(roster.members, ordered, prev));
-        setStale(true);
-        setPicked(null);
       }
     },
-    [roster.members, rosterNameSet, present, regenerate, setPlan, setPresent],
+    [expected, roster.members, rosterNameSet, regenerate, setExpected, setPlan, setPresent],
+  );
+
+  /** 从候选人里补一个人进参赛名单 */
+  const addPresent = useCallback(
+    (name: string) => {
+      setPresent((prev) => {
+        if (prev.includes(name)) return prev;
+        const next = [...prev, name];
+        setPlan((current) => regenerate(roster.members, next, current));
+        setStale(true);
+        return next;
+      });
+      setCandidates((prev) => prev.filter((item) => item !== name));
+      setShortfall((prev) => Math.max(0, prev - 1));
+    },
+    [regenerate, roster.members, setPlan, setPresent],
   );
 
   /* --------------------------- 编辑操作 --------------------------- */
@@ -294,8 +364,8 @@ export default function GuanduClient() {
           </Link>
           <h1 className="text-[26px] font-semibold tracking-[-0.02em]">官渡之战安排</h1>
           <p className="mt-1.5 max-w-2xl text-[13px] leading-relaxed text-[var(--ink-2)]">
-            上传盟员名单（实力排名）→ 识别参战截图，自动剔除不在名单里的人 → 按实力排出 30 人阵容 →
-            点两个人互换、或下拉换人微调 → 确认后生成作战表图片。
+            盟员名单只用来核对 OCR 认出的名字、并给出实力排名；真正上场的人来自「参战名单」截图。
+            识别完按实力排出 30 人阵容 → 点两个人互换、或下拉换人微调 → 确认后生成作战表图片。
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -383,6 +453,23 @@ export default function GuanduClient() {
           </span>
         </div>
 
+        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[12px] text-[var(--ink-2)]">
+          <label className="flex items-center gap-1.5">
+            预期参战人数
+            <input
+              className="input h-7 w-16 px-2 py-0 text-center text-[12px] tabular-nums"
+              inputMode="numeric"
+              value={expected}
+              onChange={(event) => setExpected(event.target.value.replace(/[^\d]/g, ""))}
+              placeholder="30"
+            />
+          </label>
+          <span className="text-[11.5px] text-[var(--muted)]">
+            自动读「正式成员（28/30）」里的数字；读不到就手填。人没齐会自动换参数再识别 2 轮，
+            还差就按实力列出可能是谁。
+          </span>
+        </div>
+
         <label
           className={cn(
             "flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border border-dashed border-[var(--line-strong)] px-4 py-6 text-center transition-colors",
@@ -421,6 +508,29 @@ export default function GuanduClient() {
           </p>
         )}
 
+        {shortfall > 0 && candidates.length > 0 && (
+          <div className="mt-3 rounded-xl border border-[var(--gold)]/35 bg-[color-mix(in_oklab,var(--gold)_7%,transparent)] px-3 py-2.5">
+            <div className="text-[12px] font-medium text-[var(--ink)]">
+              还差 {shortfall} 人：按名单实力，最可能是这些人，点一下就补进参赛名单
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {candidates.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  className="badge cursor-pointer hover:border-[var(--gold)]"
+                  onClick={() => addPresent(name)}
+                >
+                  + {name}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11.5px] text-[var(--ink-2)]">
+              都不是的话，把截图截全一点（列表要下滑就多截几张）重新识别。
+            </p>
+          </div>
+        )}
+
         {present.length > 0 && (
           <div className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-2)]/60 px-3 py-2.5">
             <div className="flex flex-wrap items-center gap-2 text-[12px]">
@@ -433,6 +543,8 @@ export default function GuanduClient() {
                 onClick={() => {
                   setPresent([]);
                   setRemoved([]);
+                  setShortfall(0);
+                  setCandidates([]);
                   setOcrMessage("已清空参赛名单，按「按实力重排」会退回名单前 30 名。");
                 }}
               >
@@ -513,23 +625,44 @@ export default function GuanduClient() {
                   </div>
 
                   <div className="mt-3 grid gap-2">
-                    {TASK_LABELS.map((label, taskIndex) => (
-                      <label key={label} className="block">
-                        <span className="mb-1 block text-[11px] tabular-nums text-[var(--muted)]">
-                          {label}
-                        </span>
-                        <textarea
-                          className="input min-h-[36px] w-full resize-y py-1.5 text-[12px] leading-snug"
-                          rows={2}
-                          value={team.tasks[taskIndex]}
-                          onChange={(event) =>
-                            updatePlan((current) =>
-                              setTeamTask(current, teamIndex, taskIndex as 0 | 1 | 2, event.target.value),
-                            )
-                          }
-                        />
-                      </label>
-                    ))}
+                    {team.grouped &&
+                      Array.from(new Set(team.rows.map((row) => row.group ?? ""))).map((group) => (
+                        <label key={group} className="block">
+                          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                            21:05 · {group}
+                          </span>
+                          <textarea
+                            className="input min-h-[36px] w-full resize-y py-1.5 text-[12px] leading-snug"
+                            rows={2}
+                            value={team.rows.find((row) => (row.group ?? "") === group)?.startTask ?? ""}
+                            onChange={(event) =>
+                              updatePlan((current) =>
+                                setGroupStartTask(current, teamIndex, group, event.target.value),
+                              )
+                            }
+                          />
+                        </label>
+                      ))}
+                    {(team.grouped ? TASK_LABELS.slice(1) : TASK_LABELS).map((label, offset) => {
+                      const taskIndex = (team.grouped ? offset + 1 : offset) as 0 | 1 | 2;
+                      return (
+                        <label key={label} className="block">
+                          <span className="mb-1 block text-[11px] tabular-nums text-[var(--muted)]">
+                            {label}
+                          </span>
+                          <textarea
+                            className="input min-h-[36px] w-full resize-y py-1.5 text-[12px] leading-snug"
+                            rows={2}
+                            value={team.tasks[taskIndex]}
+                            onChange={(event) =>
+                              updatePlan((current) =>
+                                setTeamTask(current, teamIndex, taskIndex, event.target.value),
+                              )
+                            }
+                          />
+                        </label>
+                      );
+                    })}
                   </div>
 
                   <ul className="mt-3 divide-y divide-[var(--line)]">
@@ -546,12 +679,14 @@ export default function GuanduClient() {
                         >
                           <span
                             className={cn(
-                              "w-[72px] shrink-0 truncate text-[11.5px]",
+                              "w-[92px] shrink-0 truncate text-[11.5px]",
                               row.lead ? "font-semibold text-[var(--gold)]" : "text-[var(--muted)]",
                             )}
-                            title={row.label}
+                            title={row.group ? `${row.group} · ${row.label}` : row.label}
                           >
-                            {row.label}
+                            {row.group
+                              ? `${row.group.replace(/^我方/, "").replace("小粮仓", "")}路 ${row.label}`
+                              : row.label}
                           </span>
                           <select
                             className="input h-8 flex-1 py-0 text-[12.5px]"

@@ -13,6 +13,7 @@ export async function preprocessImage(
     brightness?: number;      // 亮度偏移，默认 0
     threshold?: number;       // 二值化阈值 0-255，0 表示自动
     grayscale?: boolean;     // 是否灰度化，默认 true
+    binarize?: boolean;      // 是否二值化，默认 true（关掉只做放大+对比度，给 OCR 补一刀用）
   } = {}
 ): Promise<Blob> {
   const {
@@ -21,6 +22,7 @@ export async function preprocessImage(
     brightness = 0,
     threshold = 0,
     grayscale = true,
+    binarize = true,
   } = options;
 
   // 1. 加载图片
