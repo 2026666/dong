@@ -32,7 +32,6 @@ const STRONG_CELL = "#eef3fa";
 const WEAK_CELL = "#f8f3e9";
 const MOBILE_CELL = "#f3f3f1";
 const GROUP_BG = "#f8f3e9";
-const SUB_CELL = "#f7f3ea";
 const NAME_COL_BG = "#fffdf9";
 
 type Cell = {
@@ -55,10 +54,9 @@ type Cell = {
 };
 
 export function drawGuandu(canvas: HTMLCanvasElement, plan: GuanduPlan): { width: number; height: number } {
-  /** 正式队每队一行，替补队两人一行（照原表：替补队不编号、不分列） */
+  /** 只画正式队（替补只在页面里参与换人，不出现在成图上） */
   const teamRows = plan.teams.reduce((total, team) => total + team.rows.length, 0);
-  const subRows = Math.ceil(plan.substitutes.length / 2);
-  const bodyRows = teamRows + subRows;
+  const bodyRows = teamRows;
 
   const x0 = PAD;
   const y0 = PAD;
@@ -253,53 +251,6 @@ export function drawGuandu(canvas: HTMLCanvasElement, plan: GuanduPlan): { width
       });
     });
   });
-
-  /* ------------------------------ 替补队 ------------------------------ */
-  if (subRows > 0) {
-    const start = rowCursor;
-    rowCursor += subRows;
-    cells.push({
-      c0: 0,
-      c1: 0,
-      r0: start,
-      r1: start + subRows - 1,
-      text: "替补队",
-      font: 13,
-      weight: 600,
-      color: INK,
-      bg: SUB_CELL,
-    });
-    cells.push({
-      c0: 1,
-      c1: 1,
-      r0: start,
-      r1: start + subRows - 1,
-      text: "",
-      font: 10.5,
-      bg: SUB_CELL,
-    });
-    for (let i = 0; i < subRows; i += 1) {
-      cells.push({
-        c0: 2,
-        c1: 2,
-        r0: start + i,
-        r1: start + i,
-        text: plan.substitutes.slice(i * 2, i * 2 + 2).join("　　"),
-        font: 12.5,
-        color: INK,
-        bg: NAME_COL_BG,
-      });
-    }
-    cells.push({
-      c0: 3,
-      c1: 6,
-      r0: start,
-      r1: start + subRows - 1,
-      text: "",
-      font: 10.5,
-      bg: "#fdfbf6",
-    });
-  }
 
   // 备注：整张表从表头下一行到底部（含注意事项那一块的高度）
   cells.push({
