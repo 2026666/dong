@@ -75,7 +75,7 @@ export default function WorkspacePage() {
             <ul className="mt-5 space-y-2 text-[13px] text-[var(--ink-2)]">
               {[
                 "OCR 识别参战名单，不在名单里的人自动剔除",
-                "实力前五当队长，123 队蛇形均衡，其余进粮仓与机动",
+                "实力前五当队长，一二三四队蛇形均衡，其余进粮仓与机动",
                 "点两人互换或下拉换人，确认后出图",
               ].map((item) => (
                 <li key={item} className="flex items-start gap-2">

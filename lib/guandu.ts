@@ -308,7 +308,10 @@ function fillRows(labels: string[], names: string[]): GuanduRow[] {
  * 按名单生成初始方案（默认样式照用户的官渡作战表）。
  * official：已确认参赛的正式成员（顺序无所谓，这里会按实力重排）；
  * substitutes：没进正式的预备成员（最多 10 个）。
- * 队长：实力前五，依次坐一 / 二 / 三 / 四 / 机动队的车头位；五队三组不设队长。
+ *
+ * 队长（前五名）：第 1 → 一队，第 2 → 三队，第 3 → 二队，第 4 → 四队，第 5 → 机动队。
+ * 强组 = 一 / 二 / 三 / 四队（各 5 人：队长车头 + 队员1-4），剩下的高实力者在这四队之间蛇形；
+ * 弱组 = 五队（三路小粮仓各 2 人）+ 机动队（队员2/3/4），剩下的人在这两处蛇形。
  */
 export function buildPlan(
   official: GuanduMember[],
@@ -319,20 +322,20 @@ export function buildPlan(
   const leaders = sorted.slice(0, LEADER_COUNT).map((m) => m.name);
   const rest = sorted.slice(LEADER_COUNT).map((m) => m.name);
 
-  // 强组：一 / 二 / 三队，各 4 个队员（蛇形均衡）
-  const strong = snakeDeal(rest.slice(0, 12), [4, 4, 4]);
-  // 弱组：四队 4 人、五队 6 人（三路小粮仓各 2 人）、机动队 3 人
-  const weak = snakeDeal(rest.slice(12), [4, 6, 3]);
+  // 强组：一 / 二 / 三 / 四队，各 4 个队员（蛇形均衡）
+  const strong = snakeDeal(rest.slice(0, 16), [4, 4, 4, 4]);
+  // 弱组：五队 6 人（三路小粮仓各 2 人）、机动队 3 人
+  const weak = snakeDeal(rest.slice(16), [6, 3]);
 
   const leader = (i: number) => leaders[i] ?? "";
 
-  // 五队：weak[1] 按 2 人一组落到三路小粮仓
+  // 五队：weak[0] 按 2 人一组落到三路小粮仓
   const wuRows: GuanduRow[] = [];
   WU_DUI_GROUPS.forEach((item, g) => {
     for (let k = 0; k < 2; k += 1) {
       wuRows.push({
         label: k === 0 ? "车头" : "队员1",
-        name: weak[1][g * 2 + k] ?? "",
+        name: weak[0][g * 2 + k] ?? "",
         group: item.group,
         startTask: item.start,
       });
@@ -356,7 +359,7 @@ export function buildPlan(
         "队长不动，其他人看情况支援乌巢",
         "抢左大粮仓（敖昌），没抢到接手兵器坊驻防",
       ],
-      rows: fillRows(TEAM_LABELS.t2, [leader(1), ...strong[1]]),
+      rows: fillRows(TEAM_LABELS.t2, [leader(2), ...strong[1]]),
     },
     {
       id: "t3",
@@ -367,7 +370,7 @@ export function buildPlan(
         "乌巢",
         "官渡（抢最后一波乌巢）",
       ],
-      rows: fillRows(TEAM_LABELS.t3, [leader(2), ...strong[2]]),
+      rows: fillRows(TEAM_LABELS.t3, [leader(1), ...strong[2]]),
     },
     {
       id: "t4",
@@ -378,7 +381,7 @@ export function buildPlan(
         "工匠坊守不住就去打对方中路小粮仓",
         "霹雳车",
       ],
-      rows: fillRows(TEAM_LABELS.t4, [leader(3), ...weak[0]]),
+      rows: fillRows(TEAM_LABELS.t4, [leader(3), ...strong[3]]),
     },
     {
       id: "t5",
@@ -401,7 +404,7 @@ export function buildPlan(
         "补位",
         "看官渡情况（官渡没抢到接手工匠坊驻防）官渡赢抢右大粮仓（黎阳）",
       ],
-      rows: fillRows(TEAM_LABELS.t6, [leader(4), ...weak[2]]),
+      rows: fillRows(TEAM_LABELS.t6, [leader(4), ...weak[1]]),
     },
   ];
 
