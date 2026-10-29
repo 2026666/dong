@@ -91,7 +91,7 @@ export default function WorkspacePage() {
             <div className="mt-6 flex items-center justify-between gap-3 border-t border-[var(--line)] pt-4">
               <span className="inline-flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
                 <span className="h-1 w-1 rounded-full bg-[var(--line-strong)]" />
-                正式 30 人 · 一张作战表
+                正式 30 人 · 替补 10 人
               </span>
               <span className="btn btn-primary">
                 进入
