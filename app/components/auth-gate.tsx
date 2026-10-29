@@ -26,7 +26,6 @@ function clearLocalAuth() {
     }
     keys.forEach((key) => localStorage.removeItem(key));
     sessionStorage.clear();
-    localStorage.removeItem("guanduPlan");
   } catch {
     /* 忽略：清不掉也让用户手动重试 */
   }
@@ -110,7 +109,7 @@ function Recovery({ onClear }: { onClear: () => void }) {
         <h1 className="mt-4 text-[15px] font-semibold">登录状态有点乱</h1>
         <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--ink-2)]">
           本机存的登录信息可能已经过期，页面在登录页和工作台之间来回跳。
-          清除之后重新登录一次就好，云端的名单和战报不会丢。
+          清除之后重新登录一次就好；名单和方案都还在本机，云端的战报也不会丢。
         </p>
         <button type="button" className="btn btn-primary mt-5 w-full" onClick={onClear}>
           清除登录状态并重新登录
