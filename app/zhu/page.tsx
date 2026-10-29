@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useApp } from "@/lib/app-context";
-import { ArrowRight, Check, Grid3x3, Trophy, Users } from "lucide-react";
+import { ArrowRight, Check, Grid3x3, Swords, Trophy, Users } from "lucide-react";
 
 export default function WorkspacePage() {
   const { players, config } = useApp();
@@ -49,12 +49,57 @@ export default function WorkspacePage() {
             功能主页
           </h1>
           <p className="mx-auto mt-3 max-w-md text-[13px] leading-relaxed text-[var(--ink-2)]">
-            两个功能：赛季功勋分配、黑土安排表。
+            三个功能：赛季功勋分配、黑土安排表、官渡之战安排。
           </p>
         </div>
 
         {/* 功能入口 */}
-        <div className="mt-10 grid gap-5 sm:mt-12 lg:grid-cols-2">
+        <div className="mt-10 grid gap-5 sm:mt-12 lg:grid-cols-3">
+          <Link
+            href="/guandu"
+            className="group card card-lift flex flex-col p-6 focus-visible:outline-none sm:p-7"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <span className="grid h-11 w-11 place-items-center rounded-xl bg-[color-mix(in_oklab,var(--gold)_14%,transparent)] text-[var(--gold)]">
+                <Swords className="h-[19px] w-[19px]" strokeWidth={1.9} />
+              </span>
+            </div>
+
+            <h2 className="mt-4 text-[17px] font-semibold leading-snug">
+              官渡之战安排
+            </h2>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-[var(--ink-2)]">
+              上传盟员名单、识别参战截图，按实力排出 30 人阵容，再一键生成官渡作战表。
+            </p>
+
+            <ul className="mt-5 space-y-2 text-[13px] text-[var(--ink-2)]">
+              {[
+                "OCR 识别参战名单，不在名单里的人自动剔除",
+                "实力前五当队长，123 队蛇形均衡，其余进粮仓与机动",
+                "点两人互换或下拉换人，确认后出图",
+              ].map((item) => (
+                <li key={item} className="flex items-start gap-2">
+                  <Check
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--gold)]"
+                    strokeWidth={2.4}
+                  />
+                  {item}
+                </li>
+              ))}
+            </ul>
+
+            <div className="mt-6 flex items-center justify-between gap-3 border-t border-[var(--line)] pt-4">
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
+                <span className="h-1 w-1 rounded-full bg-[var(--line-strong)]" />
+                正式 30 人 · 替补 10 人
+              </span>
+              <span className="btn btn-primary">
+                进入
+                <ArrowRight className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+              </span>
+            </div>
+          </Link>
+
           <Link
             href="/players"
             className="group card card-lift flex flex-col p-6 focus-visible:outline-none sm:p-7"

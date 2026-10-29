@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Trophy, Upload, Settings, List, Users, LayoutGrid } from "lucide-react";
+import { Trophy, Upload, Settings, List, Users, LayoutGrid, Swords } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/lib/app-context";
 import { AccountChip } from "./account-chip";
 
 const navItems = [
   { href: "/zhu", label: "主页", icon: LayoutGrid },
+  { href: "/guandu", label: "官渡安排", icon: Swords },
   { href: "/rank", label: "总排名", icon: Trophy },
   { href: "/battles", label: "城战记录", icon: List },
   { href: "/upload", label: "上传识别", icon: Upload },

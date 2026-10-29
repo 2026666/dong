@@ -1,0 +1,544 @@
+/**
+ * 官渡之战安排：纯逻辑（不含 DOM / Canvas）
+ * ---------------------------------------------------------------------------
+ * 规则（已与用户确认）：
+ *   · 正式 30 人、预备 10 人；只安排正式。名单超过 30 人时取实力前 30，其余进替补
+ *   · 实力前五命名为队长：最强队长 → 兵器坊，第二 → 工匠坊，其余三个依次带三 / 四 / 五队
+ *   · 一 / 二 / 三队（强组，各 5 人）吃第 6 名以后的人，三队蛇形均衡
+ *   · 四队、五队（我方上 / 中 / 下路小粮仓，6 人）、机动队吃剩下的人，再蛇形均衡
+ *   · 点两个位置互换、每个位置下拉选人，都在 UI 层调用这里的纯函数
+ */
+
+export type GuanduMember = {
+  name: string;
+  /** 实力，排序主键 */
+  power: number;
+  /** 总功勋，实力相同时的第二排序键 */
+  merit: number;
+  /** 名单里的原始序号，最后兜底 */
+  seq: number;
+};
+
+export type GuanduRow = {
+  /** 成员号列文案：队长车头 / 队员1 / 车头 … */
+  label: string;
+  /** 位置上的人名，空串表示空缺 */
+  name: string;
+  /** 队伍列的分组标签（五队的三路小粮仓）；相邻同组会合并成一个单元格 */
+  group?: string;
+  /** 队长 / 车头位，出图时高亮 */
+  lead?: boolean;
+};
+
+export type GuanduTeam = {
+  id: string;
+  name: string;
+  /** 主要目标建筑，界面上做成小标签 */
+  target?: string;
+  /** 21:05 / 21:15 / 21:25 三波任务 */
+  tasks: [string, string, string];
+  rows: GuanduRow[];
+  /** 队伍列显示分组名而不是队名（五队） */
+  grouped?: boolean;
+};
+
+export type GuanduPlan = {
+  title: string;
+  teams: GuanduTeam[];
+  substitutes: string[];
+  /** 右侧备注（长规则） */
+  remark: string;
+  /** 底部注意事项 */
+  notes: string;
+  updatedAt: string;
+};
+
+export type SlotPos = { team: number; row: number };
+
+export const OFFICIAL_LIMIT = 30;
+export const SUBSTITUTE_LIMIT = 10;
+/** 实力前几名叫队长 */
+export const LEADER_COUNT = 5;
+
+export const DEFAULT_TITLE = "官渡作战表";
+
+export const DEFAULT_REMARK = [
+  "1、准备时间：青囊术 8 分 / 次，每次 20 万兵，免费高迁 5 分钟一次；车头注意看情况吃药。",
+  "2、建筑物没有驻防时不需要集结；有敌方驻防时车头开集结，大家上车。单兵卡车头时间如同攻城战：都上自己所在区域车头的车，别上其他区。21:05 之前必须进地图，替补也要提前进来，21:06 主力还没进的话替补即可登场。",
+  "3、记住几个重要时间点：21:15 乌巢开放，21:25 霹雳车 / 官渡 / 大粮仓开放，辎重车 21:12、21:18、21:25 各一波。",
+  "4、安排好的成员可以满编进驻守，其他地方蹭分的成员派少量兵即可。",
+  "5、分数等级奖：个人 50W 分（满分）、20W 分（低保）。乌巢、官渡、兵器坊、大粮仓、霹雳车是全战重点目标；小粮仓与工匠坊兵力不够时可以适时放弃，确保战略目标在手。辎重车回来以后才有加分，记得快结束时收兵。",
+  "6、稳赢的局尽量让所有人拿满 50W 分；同盟到 150W 分会提前结束（只与占领建筑数量有关，和单人拿多少无关）。分数达标者可用高迁把所有兵召回，去支援其它地方。",
+  "7、官渡拿不下来时，尽可能多地去挖辎重车（把地图缩小的地上的胶囊）：蓝色代表我方占领，红色代表敌方占领。",
+  "8、本表仅作参照：初始人员分布尽量按此表进行，后续实战灵活安排，例如小粮仓可以留人、其他人支援工匠坊 / 兵器坊。",
+].join("\n");
+
+export const DEFAULT_NOTES = [
+  "① 兵配比 6.1.3 或 5.2.3；",
+  "② 尽量多派几队兵驻防建筑，打人分加的不多；",
+  "③ 所有任务如有变动，具体听从现场指挥；",
+  "④ 队长在战场上都可以机动，随机应变；",
+  "⑤ 官渡打不下来，就去找人少的任何建筑占领；",
+  "⑥ 占领建筑后，其他人去大粮仓或辎重车；",
+  "⑦ 替补进来的优先抢我方没人、或者人少的小粮仓；",
+  "⑧ 自己驻防的位置没有对方人员，就高迁到需要的地方去驻防。",
+].join("\n");
+
+/* ------------------------------ 名单解析 ------------------------------ */
+
+const NAME_KEYS = ["成员名称", "成员名", "成员", "名字", "名称", "玩家名", "玩家", "昵称", "姓名"];
+/** 「实力」一定是首选；没有表头时才退到「战力」 */
+const POWER_KEYS = ["实力", "总战力", "战力", "战斗力"];
+const MERIT_KEYS = ["总功勋", "累计功勋", "功勋"];
+const SEQ_KEYS = ["序号", "排名", "名次"];
+
+export type GuanduParseResult = {
+  members: GuanduMember[];
+  /** 命中的列下标（-1 表示没这一列），便于界面提示 */
+  columns: { name: number; power: number; merit: number; seq: number };
+  /** 实力列的表头文案，比如「实力」 */
+  powerLabel: string;
+  hasHeader: boolean;
+};
+
+function toNumber(input: string): number {
+  const cleaned = String(input ?? "").replace(/[,\s，]/g, "");
+  if (!cleaned) return 0;
+  const value = Number(cleaned);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function isNumericCell(value: string): boolean {
+  return /^-?\d+(\.\d+)?$/.test(value.trim());
+}
+
+function numericRatioOf(rows: string[][], col: number): number {
+  if (col < 0) return 0;
+  const values = rows.map((row) => (row[col] ?? "").trim()).filter(Boolean);
+  if (!values.length) return 0;
+  return values.filter(isNumericCell).length / values.length;
+}
+
+function findColumn(header: string[], keys: string[]): number {
+  for (const key of keys) {
+    const index = header.findIndex((cell) => cell.replace(/\s/g, "") === key);
+    if (index >= 0) return index;
+  }
+  for (const key of keys) {
+    const index = header.findIndex((cell) => cell.includes(key));
+    if (index >= 0) return index;
+  }
+  return -1;
+}
+
+/** 名字列：非数字占比最高的那一列 */
+function pickNameColumn(rows: string[][], cols: number): number {
+  let best = 0;
+  let bestScore = -1;
+  for (let col = 0; col < cols; col += 1) {
+    const values = rows.map((row) => (row[col] ?? "").trim()).filter(Boolean);
+    if (!values.length) continue;
+    const score = values.filter((v) => !isNumericCell(v)).length / values.length;
+    if (score > bestScore) {
+      bestScore = score;
+      best = col;
+    }
+  }
+  return bestScore > 0 ? best : 0;
+}
+
+/** 没有表头时的实力列：取最后一个纯数字列（名单里「实力」一般收在末尾） */
+function pickPowerColumn(rows: string[][], cols: number, skip: number): number {
+  let best = -1;
+  for (let col = cols - 1; col >= 0; col -= 1) {
+    if (col === skip) continue;
+    const values = rows.map((row) => (row[col] ?? "").trim()).filter(Boolean);
+    if (!values.length) continue;
+    if (values.filter(isNumericCell).length / values.length < 0.9) continue;
+    best = col;
+    break;
+  }
+  return best;
+}
+
+export function splitTableText(text: string): string[][] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.split(/\t+|\s{2,}|[，,]/).map((cell) => cell.trim()));
+}
+
+export function parseGuanduRoster(text: string): GuanduParseResult {
+  return parseGuanduRows(splitTableText(text));
+}
+
+export function parseGuanduRows(rows: string[][]): GuanduParseResult {
+  const empty: GuanduParseResult = {
+    members: [],
+    columns: { name: -1, power: -1, merit: -1, seq: -1 },
+    powerLabel: "",
+    hasHeader: false,
+  };
+
+  const cleaned = rows
+    .map((row) => row.map((cell) => String(cell ?? "").trim()))
+    .filter((row) => row.some((cell) => cell.trim()));
+  if (!cleaned.length) return empty;
+
+  const header = cleaned[0];
+  const hasHeader = findColumn(header, NAME_KEYS) >= 0;
+  const body = hasHeader ? cleaned.slice(1) : cleaned;
+  if (!body.length) return { ...empty, hasHeader };
+
+  const bodyCols = body.reduce((max, row) => Math.max(max, row.length), 0);
+  // 表头常比数据行少一列（数据行行首多一个序号），按数据行列数对齐
+  const offset = hasHeader ? Math.max(0, bodyCols - header.length) : 0;
+  const align = (index: number) =>
+    index < 0 ? -1 : Math.min(index + offset, Math.max(0, bodyCols - 1));
+
+  let nameIndex = align(findColumn(header, NAME_KEYS));
+  let powerIndex = align(findColumn(header, POWER_KEYS));
+  let meritIndex = align(findColumn(header, MERIT_KEYS));
+  let seqIndex = align(findColumn(header, SEQ_KEYS));
+
+  if (nameIndex < 0 || numericRatioOf(body, nameIndex) > 0.5) {
+    nameIndex = pickNameColumn(body, bodyCols);
+  }
+  if (powerIndex < 0 || powerIndex === nameIndex || numericRatioOf(body, powerIndex) < 0.5) {
+    powerIndex = pickPowerColumn(body, bodyCols, nameIndex);
+  }
+  if (meritIndex >= 0 && (numericRatioOf(body, meritIndex) < 0.5 || meritIndex === nameIndex)) {
+    meritIndex = -1;
+  }
+  if (seqIndex >= 0 && numericRatioOf(body, seqIndex) < 0.5) {
+    seqIndex = -1;
+  }
+
+  const members: GuanduMember[] = [];
+  const seen = new Set<string>();
+  body.forEach((row, index) => {
+    const name = (row[nameIndex] ?? "").trim();
+    if (!name || /^[\d.,，]+$/.test(name)) return;
+    if (seen.has(name)) return;
+    seen.add(name);
+    members.push({
+      name,
+      power: powerIndex >= 0 ? toNumber(row[powerIndex]) : 0,
+      merit: meritIndex >= 0 ? toNumber(row[meritIndex]) : 0,
+      seq: (seqIndex >= 0 ? toNumber(row[seqIndex]) : 0) || index + 1,
+    });
+  });
+
+  return {
+    members,
+    columns: { name: nameIndex, power: powerIndex, merit: meritIndex, seq: seqIndex },
+    powerLabel: hasHeader && powerIndex >= 0 ? header[powerIndex - offset] ?? "" : "",
+    hasHeader,
+  };
+}
+
+/** 实力高的在前；实力相同看总功勋；再相同看原序号 */
+export function sortMembers(members: GuanduMember[]): GuanduMember[] {
+  return [...members].sort(
+    (a, b) =>
+      b.power - a.power ||
+      b.merit - a.merit ||
+      a.seq - b.seq ||
+      a.name.localeCompare(b.name, "zh"),
+  );
+}
+
+/* ------------------------------ 蛇形分配 ------------------------------ */
+
+/**
+ * 把 people 依次发到各队：每轮每队一个人，轮次之间方向来回翻转（蛇形），
+ * 队满就跳过，保证各队实力尽量接近。
+ */
+export function snakeDeal(people: string[], caps: number[]): string[][] {
+  const out: string[][] = caps.map(() => []);
+  let index = 0;
+  let forward = true;
+  while (index < people.length) {
+    const order = caps.map((_, i) => i);
+    if (!forward) order.reverse();
+    let placed = false;
+    for (const teamIndex of order) {
+      if (index >= people.length) break;
+      if (out[teamIndex].length >= caps[teamIndex]) continue;
+      out[teamIndex].push(people[index]);
+      index += 1;
+      placed = true;
+    }
+    if (!placed) break; // 所有队都满了
+    forward = !forward;
+  }
+  return out;
+}
+
+/* ------------------------------ 生成方案 ------------------------------ */
+
+function leadRow(label: string, name: string, group?: string): GuanduRow {
+  return group ? { label, name, group, lead: true } : { label, name, lead: true };
+}
+
+function memberRows(names: string[], count: number, group?: string): GuanduRow[] {
+  return Array.from({ length: count }, (_, i) => {
+    const row: GuanduRow = { label: `队员${i + 1}`, name: names[i] ?? "" };
+    if (group) row.group = group;
+    return row;
+  });
+}
+
+/**
+ * 按名单生成初始方案。
+ * official：已确认参赛的正式成员（顺序无所谓，这里会按实力重排）；
+ * substitutes：没进正式的预备成员（最多 10 个）。
+ */
+export function buildPlan(
+  official: GuanduMember[],
+  substitutes: string[] = [],
+  base?: Partial<Pick<GuanduPlan, "title" | "remark" | "notes">>,
+): GuanduPlan {
+  const sorted = sortMembers(official).slice(0, OFFICIAL_LIMIT);
+  const leaders = sorted.slice(0, LEADER_COUNT).map((m) => m.name);
+  const rest = sorted.slice(LEADER_COUNT).map((m) => m.name);
+
+  // 强组：一 / 二 / 三队，各 4 个队员
+  const strong = snakeDeal(rest.slice(0, 12), [4, 4, 4]);
+  // 弱组：四队 4 人、五队 5 人、机动队 4 人（含机动队长）
+  const weak = snakeDeal(rest.slice(12), [4, 5, 4]);
+
+  const first = (list: string[], i: number) => list[i] ?? "";
+
+  const teams: GuanduTeam[] = [
+    {
+      id: "t1",
+      name: "一队",
+      target: "兵器坊",
+      tasks: ["开局飞兵器坊", "乌巢", "官渡"],
+      rows: [leadRow("队长车头", first(leaders, 0)), ...memberRows(strong[0], 4)],
+    },
+    {
+      id: "t2",
+      name: "二队",
+      target: "工匠坊",
+      tasks: [
+        "开局飞工匠坊（对方下路小粮仓）",
+        "队长不动，其他人支援乌巢",
+        "抢左大粮仓（敖昌），没抢到接手兵器坊驻防",
+      ],
+      rows: [leadRow("队长车头", first(leaders, 1)), ...memberRows(strong[1], 4)],
+    },
+    {
+      id: "t3",
+      name: "三队",
+      target: "大粮仓",
+      tasks: [
+        "开局飞大粮仓（对方上路小粮仓）",
+        "乌巢",
+        "官渡（抢最后一波乌巢）",
+      ],
+      rows: [leadRow("队长车头", first(leaders, 2)), ...memberRows(strong[2], 4)],
+    },
+    {
+      id: "t4",
+      name: "四队",
+      target: "上路小粮仓",
+      tasks: [
+        "飞我方上路小粮仓（阳武 / 封丘）",
+        "小粮仓没抢到就支援中路",
+        "霹雳车",
+      ],
+      rows: [leadRow("队长车头", first(leaders, 3)), ...memberRows(weak[0], 4)],
+    },
+    {
+      id: "t5",
+      name: "五队",
+      target: "三路小粮仓",
+      grouped: true,
+      tasks: [
+        "飞我方上 / 中 / 下路小粮仓（阳武 / 延津 / 原武）",
+        "一路没抢到就机动支援其他建筑",
+        "1、2、3 协助抢左大粮仓，4、5、6 协助抢右大粮仓",
+      ],
+      rows: [
+        leadRow("车头", first(leaders, 4), "上路小粮仓"),
+        ...memberRows([first(weak[1], 0)], 1, "上路小粮仓"),
+        leadRow("车头", first(weak[1], 1), "中路小粮仓"),
+        ...memberRows([first(weak[1], 2)], 1, "中路小粮仓"),
+        leadRow("车头", first(weak[1], 3), "下路小粮仓"),
+        ...memberRows([first(weak[1], 4)], 1, "下路小粮仓"),
+      ],
+    },
+    {
+      id: "t6",
+      name: "机动队",
+      target: "补位",
+      tasks: [
+        "开局看情况帮工匠或兵器（没抢下来的）",
+        "补位",
+        "官渡情况：官渡没抢到就接手工匠坊驻防",
+      ],
+      rows: [leadRow("机动队长", first(weak[2], 0)), ...memberRows(weak[2].slice(1), 3)],
+    },
+  ];
+
+  return {
+    title: base?.title ?? DEFAULT_TITLE,
+    teams,
+    substitutes: substitutes.filter(Boolean).slice(0, SUBSTITUTE_LIMIT),
+    remark: base?.remark ?? DEFAULT_REMARK,
+    notes: base?.notes ?? DEFAULT_NOTES,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/* ------------------------------ 编辑操作 ------------------------------ */
+
+export function clonePlan(plan: GuanduPlan): GuanduPlan {
+  return {
+    ...plan,
+    teams: plan.teams.map((team) => ({
+      ...team,
+      tasks: [...team.tasks] as [string, string, string],
+      rows: team.rows.map((row) => ({ ...row })),
+    })),
+    substitutes: [...plan.substitutes],
+  };
+}
+
+export function locateName(plan: GuanduPlan, name: string): SlotPos | null {
+  if (!name) return null;
+  for (let team = 0; team < plan.teams.length; team += 1) {
+    const rows = plan.teams[team].rows;
+    for (let row = 0; row < rows.length; row += 1) {
+      if (rows[row].name === name) return { team, row };
+    }
+  }
+  return null;
+}
+
+/** 两个位置互换（队长位不动，只换人） */
+export function swapSlots(plan: GuanduPlan, a: SlotPos, b: SlotPos): GuanduPlan {
+  const next = clonePlan(plan);
+  const nameA = next.teams[a.team].rows[a.row].name;
+  const nameB = next.teams[b.team].rows[b.row].name;
+  next.teams[a.team].rows[a.row].name = nameB;
+  next.teams[b.team].rows[b.row].name = nameA;
+  return touch(next);
+}
+
+/**
+ * 把人放到某个位置：
+ * · 他已经在别的队里 → 两边互换
+ * · 他原来在替补里 → 被换下来的人进替补（保持替补人数）
+ * · 其它情况（名单里还没安排的人）→ 直接占位，原本的人回到未安排
+ */
+export function assignToSlot(plan: GuanduPlan, pos: SlotPos, name: string): GuanduPlan {
+  const next = clonePlan(plan);
+  const slot = next.teams[pos.team].rows[pos.row];
+  const previous = slot.name;
+  const target = name.trim();
+
+  if (!target) {
+    slot.name = "";
+    return touch(next);
+  }
+  if (previous === target) return plan;
+
+  const existing = locateName(next, target);
+  if (existing) {
+    next.teams[existing.team].rows[existing.row].name = previous;
+    slot.name = target;
+    return touch(next);
+  }
+
+  slot.name = target;
+  const subIndex = next.substitutes.indexOf(target);
+  if (subIndex >= 0) {
+    if (previous) next.substitutes[subIndex] = previous;
+    else next.substitutes.splice(subIndex, 1);
+  }
+  return touch(next);
+}
+
+export function setTeamTask(
+  plan: GuanduPlan,
+  teamIndex: number,
+  slot: 0 | 1 | 2,
+  value: string,
+): GuanduPlan {
+  const next = clonePlan(plan);
+  const team = next.teams[teamIndex];
+  if (!team) return plan;
+  team.tasks[slot] = value;
+  return touch(next);
+}
+
+export function setTeamName(plan: GuanduPlan, teamIndex: number, value: string): GuanduPlan {
+  const next = clonePlan(plan);
+  const team = next.teams[teamIndex];
+  if (!team) return plan;
+  team.name = value;
+  return touch(next);
+}
+
+export function addSubstitute(plan: GuanduPlan, name: string): GuanduPlan {
+  const target = name.trim();
+  if (!target) return plan;
+  if (plan.substitutes.includes(target)) return plan;
+  if (locateName(plan, target)) return plan;
+  if (plan.substitutes.length >= SUBSTITUTE_LIMIT) return plan;
+  const next = clonePlan(plan);
+  next.substitutes.push(target);
+  return touch(next);
+}
+
+export function removeSubstitute(plan: GuanduPlan, name: string): GuanduPlan {
+  const next = clonePlan(plan);
+  next.substitutes = next.substitutes.filter((item) => item !== name);
+  return touch(next);
+}
+
+export function setPlanText(
+  plan: GuanduPlan,
+  patch: Partial<Pick<GuanduPlan, "title" | "remark" | "notes">>,
+): GuanduPlan {
+  return touch({ ...clonePlan(plan), ...patch });
+}
+
+function touch(plan: GuanduPlan): GuanduPlan {
+  plan.updatedAt = new Date().toISOString();
+  return plan;
+}
+
+/* ------------------------------ 派生信息 ------------------------------ */
+
+export function plannedNames(plan: GuanduPlan): string[] {
+  const names: string[] = [];
+  for (const team of plan.teams) {
+    for (const row of team.rows) {
+      if (row.name && !names.includes(row.name)) names.push(row.name);
+    }
+  }
+  return names;
+}
+
+export function plannedCount(plan: GuanduPlan): number {
+  return plan.teams.reduce(
+    (total, team) => total + team.rows.filter((row) => row.name).length,
+    0,
+  );
+}
+
+export function slotCount(plan: GuanduPlan): number {
+  return plan.teams.reduce((total, team) => total + team.rows.length, 0);
+}
+
+/** 名单里既没进正式、也没进替补的人 */
+export function unarrangedNames(plan: GuanduPlan, rosterNames: string[]): string[] {
+  const placed = new Set(plannedNames(plan));
+  const bench = new Set(plan.substitutes);
+  return rosterNames.filter((name) => !placed.has(name) && !bench.has(name));
+}
