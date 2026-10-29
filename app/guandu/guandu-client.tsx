@@ -58,6 +58,11 @@ export default function GuanduClient() {
   /** 补识别之后还差几个人、可能是谁 */
   const [shortfall, setShortfall] = useState(0);
   const [candidates, setCandidates] = useState<string[]>([]);
+  /** 从总名单里手动挑人：展开状态 + 搜索词 + 手输名字 + 提示 */
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const [manualName, setManualName] = useState("");
+  const [pickerNote, setPickerNote] = useState<string | null>(null);
   const [picked, setPicked] = useState<SlotPos | null>(null);
   const [generated, setGenerated] = useState(false);
   const [stale, setStale] = useState(false);
@@ -75,6 +80,20 @@ export default function GuanduClient() {
     const pool = present.length ? present.length : rosterNames.length;
     return Math.max(0, pool - OFFICIAL_LIMIT);
   }, [present.length, rosterNames.length]);
+
+  /** 预期参战人数（手填优先，没填就是 30） */
+  const targetCount = useMemo(() => {
+    const value = Number(expected);
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : OFFICIAL_LIMIT;
+  }, [expected]);
+
+  /** 从总名单里挑人用的列表：全部名单按实力从高到低 */
+  const rosterSorted = useMemo(() => sortMembers(roster.members), [roster.members]);
+  const pickerList = useMemo(() => {
+    const keyword = pickerQuery.trim().toLowerCase();
+    if (!keyword) return rosterSorted;
+    return rosterSorted.filter((member) => member.name.toLowerCase().includes(keyword));
+  }, [pickerQuery, rosterSorted]);
   const unarranged = useMemo(
     () => (plan ? unarrangedNames(plan, rosterNames) : []),
     [plan, rosterNames],
@@ -261,11 +280,13 @@ export default function GuanduClient() {
         );
 
         setOcrBusy(false);
+        // 3 轮还没认全：自动展开「从总名单里挑人」，和候选人一起给用户兜底
+        if (gap > 0) setPickerOpen(true);
         setOcrMessage(
           ordered.length
             ? `认出名单里 ${ordered.length} / ${target || ordered.length} 人${
                 missing.length ? `，自动剔除 ${missing.length} 个不在名单里的名字` : ""
-              }${gap > 0 ? `，还差 ${gap} 人（看下面的候选人）` : ""}`
+              }${gap > 0 ? `，还差 ${gap} 人（下面的候选人或「从总名单里挑人」都行）` : ""}`
             : "一个都没对上：确认这张是「参战名单」页，且名单表格是最新的。",
         );
 
@@ -284,9 +305,24 @@ export default function GuanduClient() {
     [expected, roster.members, rosterNameSet, regenerate, setExpected, setPlan, setPresent],
   );
 
-  /** 从候选人里补一个人进参赛名单 */
+  /** 从候选 / 名单里补一个人进参赛名单（补到预期人数就停） */
   const addPresent = useCallback(
     (name: string) => {
+      if (!rosterNameSet.has(name)) {
+        setPickerNote(`「${name}」不在盟员名单里，不能加进参赛名单。先用第 1 步把名单补全。`);
+        return;
+      }
+      if (present.includes(name)) {
+        setPickerNote(`「${name}」已经在参赛名单里了。`);
+        return;
+      }
+      if (present.length >= targetCount) {
+        setPickerNote(
+          `已经够 ${targetCount} 人了（预期参战人数），再加就超了；要换人请先在上面点掉一个。`,
+        );
+        return;
+      }
+      setPickerNote(null);
       setPresent((prev) => {
         if (prev.includes(name)) return prev;
         const next = [...prev, name];
@@ -297,7 +333,38 @@ export default function GuanduClient() {
       setCandidates((prev) => prev.filter((item) => item !== name));
       setShortfall((prev) => Math.max(0, prev - 1));
     },
-    [regenerate, roster.members, setPlan, setPresent],
+    [
+      present,
+      regenerate,
+      roster.members,
+      rosterNameSet,
+      setPlan,
+      setPresent,
+      targetCount,
+    ],
+  );
+
+  /** 手输名字补人：只认名单里的人（先精确，再按包含匹配纠错） */
+  const addManualPresent = useCallback(
+    (raw: string) => {
+      const input = raw.trim();
+      if (!input) return;
+      const norm = (value: string) => value.replace(/\s+/g, "").toLowerCase();
+      const target = norm(input);
+      const exact = rosterNames.find((name) => norm(name) === target);
+      const fuzzy =
+        exact ??
+        rosterNames.find(
+          (name) => norm(name).includes(target) || target.includes(norm(name)),
+        );
+      if (!fuzzy) {
+        setPickerNote(`「${input}」不在盟员名单里。只能从名单里选人，先把名单补全再试。`);
+        return;
+      }
+      addPresent(fuzzy);
+      setManualName("");
+    },
+    [addPresent, rosterNames],
   );
 
   /* --------------------------- 编辑操作 --------------------------- */
@@ -526,6 +593,94 @@ export default function GuanduClient() {
           </div>
         )}
 
+        {rosterSorted.length > 0 && (
+          <div className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-2)]/50 px-3 py-2.5">
+            <div className="flex flex-wrap items-center gap-2 text-[12px]">
+              <button
+                type="button"
+                className="font-medium text-[var(--ink)] underline decoration-[var(--line-strong)] underline-offset-2 hover:decoration-[var(--gold)]"
+                onClick={() => {
+                  setPickerOpen((open) => !open);
+                  setPickerNote(null);
+                }}
+              >
+                {pickerOpen ? "收起" : "从总名单里挑人"}
+              </button>
+              <span className="text-[11.5px] text-[var(--muted)]">
+                当前 {present.length} / 预期 {targetCount} 人
+                {shortfall > 0 ? `，还差 ${shortfall} 人` : ""}
+              </span>
+            </div>
+
+            {pickerOpen && (
+              <div className="mt-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    className="input h-7 w-40 px-2 py-0 text-[12px]"
+                    placeholder="搜名字"
+                    value={pickerQuery}
+                    onChange={(event) => setPickerQuery(event.target.value)}
+                  />
+                  <input
+                    className="input h-7 w-44 px-2 py-0 text-[12px]"
+                    placeholder="手输名字（必须在名单里）"
+                    value={manualName}
+                    onChange={(event) => setManualName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        addManualPresent(manualName);
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-quiet h-7 px-2.5 py-0 text-[12px]"
+                    onClick={() => addManualPresent(manualName)}
+                  >
+                    加入
+                  </button>
+                </div>
+
+                <div className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-[var(--line)] bg-[var(--surface)]">
+                  {pickerList.length === 0 && (
+                    <p className="px-3 py-2 text-[12px] text-[var(--muted)]">名单里没有匹配的名字</p>
+                  )}
+                  {pickerList.map((member) => {
+                    const added = present.includes(member.name);
+                    return (
+                      <button
+                        key={member.name}
+                        type="button"
+                        disabled={added}
+                        onClick={() => addPresent(member.name)}
+                        className={cn(
+                          "flex w-full items-center gap-2 border-b border-[var(--line)] px-3 py-1.5 text-left text-[12px] last:border-b-0",
+                          added
+                            ? "cursor-default text-[var(--muted)]"
+                            : "hover:bg-[var(--surface-2)]",
+                        )}
+                      >
+                        <span className="flex-1 truncate">{member.name}</span>
+                        <span className="tabular-nums text-[11px] text-[var(--muted)]">
+                          {member.power ? member.power.toLocaleString("zh-CN") : "—"}
+                        </span>
+                        <span className="w-12 shrink-0 text-right text-[11px]">
+                          {added ? "已参赛" : <span className="text-[var(--gold)]">加入</span>}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {pickerNote && (
+                  <p className="mt-1.5 text-[11.5px] text-[#8a4b09]">{pickerNote}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {present.length > 0 && (
           <div className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-2)]/60 px-3 py-2.5">
             <div className="flex flex-wrap items-center gap-2 text-[12px]">
@@ -540,17 +695,33 @@ export default function GuanduClient() {
                   setRemoved([]);
                   setShortfall(0);
                   setCandidates([]);
+                  setPickerNote(null);
                   setOcrMessage("已清空参赛名单，按「按实力重排」会退回名单前 30 名。");
                 }}
               >
                 清空
               </button>
+              <span className="text-[11.5px] text-[var(--muted)]">点名字可以移出</span>
             </div>
             <div className="mt-1.5 flex max-h-24 flex-wrap gap-1 overflow-y-auto">
               {present.map((name) => (
-                <span key={name} className="badge">
-                  {name}
-                </span>
+                <button
+                  key={name}
+                  type="button"
+                  className="badge hover:border-[var(--line-strong)] hover:bg-[var(--surface)]"
+                  title="点一下移出参赛名单"
+                  onClick={() => {
+                    setPresent((prev) => {
+                      const next = prev.filter((item) => item !== name);
+                      setPlan((current) => regenerate(roster.members, next, current ?? null));
+                      setStale(true);
+                      return next;
+                    });
+                    setPickerNote(null);
+                  }}
+                >
+                  {name} ×
+                </button>
               ))}
             </div>
           </div>
